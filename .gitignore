@@ -34,3 +34,6 @@ cerebras_os/obj/Debug/net8.0/staticwebassets/msbuild.build.cerebras_os.props
 cerebras_os/obj/Debug/net8.0/staticwebassets/msbuild.buildMultiTargeting.cerebras_os.props
 cerebras_os/obj/Debug/net8.0/staticwebassets/msbuild.buildTransitive.cerebras_os.props
 cerebras_os/obj/Debug/net8.0/staticwebassets/msbuild.cerebras_os.Microsoft.AspNetCore.StaticWebAssets.props
+cerebras_os/bin/Debug/net8.0/DotNetEnv.dll
+cerebras_os/bin/Debug/net8.0/Sprache.dll
+cerebras_os/obj/Debug/net8.0/cerebras.F83F85DE.Up2Date
