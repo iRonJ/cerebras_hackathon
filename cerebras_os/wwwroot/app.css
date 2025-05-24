@@ -49,3 +49,13 @@ h1:focus {
 .darker-border-checkbox.form-check-input {
     border-color: #929292;
 }
+
+.draggable {
+  position: absolute;        /* so you can freely move it around */
+  cursor: grab;              /* show a “grab” cursor */
+  user-select: none;         /* don’t accidentally select text while dragging */
+  touch-action: none;        /* disable native touch-scroll on mobile */
+}
+.draggable:active {
+  cursor: grabbing;          /* while you’re holding it down */
+}

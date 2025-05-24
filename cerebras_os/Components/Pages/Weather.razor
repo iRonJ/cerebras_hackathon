@@ -1,19 +1,22 @@
 ﻿@page "/weather"
 @attribute [StreamRendering]
+@rendermode InteractiveServer
 
-<PageTitle>Weather</PageTitle>
+@inject cerebras_os.Services.OpenRouterService OpenRouterService
+@inject cerebras_os.Services.UserSessionState SessionState
+@inject IJSRuntime JS
 
-<h1>Weather</h1>
+<PageTitle>Desktop</PageTitle>
 
-<p>This component demonstrates showing data.</p>
 
+<div id="stage" style="position:relative; width:800px; height:500px; border:1px solid #ccc;">
 @if (forecasts == null)
 {
     <p><em>Loading...</em></p>
 }
 else
 {
-    <table class="table">
+    <table class="table draggable" style="left:20px; top:20px">
         <thead>
             <tr>
                 <th>Date</th>
@@ -35,9 +38,24 @@ else
         </tbody>
     </table>
 }
+  <svg id="icon"    class="draggable" width="80" height="80" style="left:350px; top:100px"
+       viewBox="0 0 100 100">
+    <circle cx="50" cy="50" r="40" fill="tomato"/>
+  </svg>
+  <button class="draggable" @onclick="async () =>await OnSave4Click()">click
+</button>
 
-@code {
+<div class="draggable"> 
+@(apiResult != null ? (MarkupString)apiResult : null)</div>
+</div>
+
+
+@code 
+{
     private WeatherForecast[]? forecasts;
+
+    private string? apiResult;
+    private bool isLoading = false;
 
     protected override async Task OnInitializedAsync()
     {
@@ -52,8 +70,8 @@ else
             TemperatureC = Random.Shared.Next(-20, 55),
             Summary = summaries[Random.Shared.Next(summaries.Length)]
         }).ToArray();
-    }
 
+    }    
     private class WeatherForecast
     {
         public DateOnly Date { get; set; }
@@ -61,4 +79,35 @@ else
         public string? Summary { get; set; }
         public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
     }
+    private async Task OnSave4Click()
+    {
+        try
+        {
+            // Only send public/allowed session state to the LLM
+            var sessionDict = SessionState.Objects.ToDictionary(kv => kv.Key, kv => kv.Value.ContextText);
+            sessionDict.Add("Current HTML of the widget. Please reuse it if it's good", apiResult);
+            var content = await OpenRouterService.GetChatCompletionWithContextAsync("What's the weather in raleigh?", sessionDict);
+            apiResult = content["HTMLText"].ToString() ?? "No valid response.";
+            // Optionally, parse and update session state as before
+            if(content["liveData"].ToString().ToLower() == "true")
+            {
+                SessionState.AddOrUpdate("What's the weather in raleigh?", new cerebras_os.Services.SessionObject()
+                {
+                    PromptText = content["prompt"].ToString(),
+                    NeedsUpdate = true,
+                    LiveData= true,
+                    ContextText = content["HTMLText"].ToString() ?? "No valid response."
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error: {ex.Message}");
+        }
+    }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+            await JS.InvokeVoidAsync("makeDraggable", ".draggable");
+    }
+
 }

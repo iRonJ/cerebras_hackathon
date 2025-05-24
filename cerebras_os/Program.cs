@@ -1,6 +1,7 @@
 using cerebras_os.Components;
 using cerebras_os.Services;
 using DotNetEnv;
+using Microsoft.AspNetCore.Components.Web;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,6 +12,7 @@ Env.Load();
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddHttpClient<OpenRouterService>();
+builder.Services.AddScoped<cerebras_os.Services.UserSessionState>();
 
 var app = builder.Build();
 
@@ -29,5 +31,4 @@ app.UseAntiforgery();
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
-
 app.Run();
