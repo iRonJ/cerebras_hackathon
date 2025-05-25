@@ -4,8 +4,14 @@ window.makeDraggable = function(selector) {
 
   document.querySelectorAll(selector).forEach(el => {
     el.addEventListener('mousedown', e => {
-      dragged = el;
-      const rect = el.getBoundingClientRect();
+      // Prevent drag if mousedown is on the resize handle
+      if (e.target.classList.contains('resize-handle') || e.target.closest('.resize-handle')) {
+        return;
+      }
+      // If this is a titlebar, drag the parent widget-outer
+      let dragTarget = el.closest('.widget-outer') || el;
+      dragged = dragTarget;
+      const rect = dragTarget.getBoundingClientRect();
       // Get sidebar width if present
       const sidebar = document.querySelector('.sidebar');
       const sidebarWidth = sidebar ? sidebar.offsetWidth : 0;
@@ -16,7 +22,7 @@ window.makeDraggable = function(selector) {
       offsetY = e.clientY - rect.top;
       dragged.dataset.sidebarWidth = sidebarWidth;
       dragged.dataset.topRowHeight = topRowHeight;
-      el.style.zIndex = 1000;
+      dragTarget.style.zIndex = 1000;
       console.log('dragged', dragged);
       console.log(`e.clientX: ${e.clientX}, rect.left: ${rect.left}, e.clientY: ${e.clientY}, rect.top: ${rect.top}, sidebarWidth: ${sidebarWidth}, topRowHeight: ${topRowHeight}`);
     });
@@ -55,5 +61,12 @@ window.makeDraggable = function(selector) {
   document.addEventListener('touchend', () => {
     if (dragged) dragged.style.zIndex = '';
     dragged = null;
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && dragged) {
+      if (dragged) dragged.style.zIndex = '';
+      dragged = null;
+    }
   });
 };

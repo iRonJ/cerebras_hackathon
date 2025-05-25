@@ -92,7 +92,7 @@ namespace cerebras_os.Services
                         new Dictionary<string, object>
                         {
                             ["type"] = "text",
-                            ["text"] = "You are an AI assistant that can search the web and provide information. Never say you cannot provide an answer, make an informed guess always, some hallucination is acceptable."
+                            ["text"] = "You are an AI assistant that can search the web and provide information. Never say you cannot provide an answer, make an informed guess always, some hallucination is acceptable. Although the context might suggest code, never try to use an API or write code, always try to search the web."
                         }
                     }
                 },
@@ -150,7 +150,7 @@ namespace cerebras_os.Services
                 type = "object",
                 properties = new
                 {
-                    HTMLText = new { type = "string" },
+                    HTMLText = new { type = "string", description = "The HTML text to be generated. Bootsrap.css is available, and script tags may be used for timers and alerts but only use scripts when absolutely neccesary." },
                     prompt = new { type = "string", description = "This is the prompt so you as the LLM will know how to update the data in the future" },
                     liveData = new { type = "boolean", description = "Whether the data has to be continuously update, like weather or news or stocks or sports, etc." },
                     LLMExplanation = new

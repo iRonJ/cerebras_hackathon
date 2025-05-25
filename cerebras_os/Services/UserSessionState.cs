@@ -52,7 +52,7 @@ namespace cerebras_os.Services
                     {
                         try
                         {
-                            var response = await _openRouterService.GetGeminiWebSearchAsync($"My current data is:\"{kvp.Value.ContextText}\" it might already be good or need updating or correcting. {kvp.Value.PromptText}");
+                            var response = await _openRouterService.GetGeminiWebSearchAsync($"{kvp.Value.PromptText}");
                             if (response != null)
                             {
                                 kvp.Value.ContextText = response;
