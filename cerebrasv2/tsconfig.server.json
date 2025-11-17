@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.node.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.server.tsbuildinfo",
+    "outDir": "./dist/server",
+    "rootDir": ".",
+    "moduleResolution": "Node",
+    "module": "CommonJS",
+    "target": "ES2022",
+    "noEmit": false,
+    "allowImportingTsExtensions": false,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "verbatimModuleSyntax": false,
+    "erasableSyntaxOnly": false,
+    "types": ["node"]
+  },
+  "include": ["server/**/*.ts", "src/types.ts"]
+}
