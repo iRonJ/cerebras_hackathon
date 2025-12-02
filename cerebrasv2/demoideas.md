@@ -1,0 +1,2 @@
+- read photos on disk and use a hugging face model to do embedding and webgl for a 3d umap visualization
+- fea genetic algorithm to create a 3d pritnable drone frame

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { WidgetInstance } from '../types';
 
 interface WidgetWindowProps {
@@ -17,6 +17,8 @@ export function WidgetWindow({
   onFocus,
 }: WidgetWindowProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
+  const [frameUrl, setFrameUrl] = useState<string | null>(null);
+  const blobRef = useRef<string | null>(null);
 
   const startPointerSession = useCallback(
     (event: React.PointerEvent, mode: 'move' | 'resize') => {
@@ -55,23 +57,28 @@ export function WidgetWindow({
   );
 
   useEffect(() => {
-    if (!widget.scripts?.length) return;
-    const container = nodeRef.current;
-    if (!container) return;
-    const scriptElements: HTMLScriptElement[] = [];
-    widget.scripts.forEach((code) => {
-      const script = document.createElement('script');
-      script.type = 'text/javascript';
-      script.text = code;
-      container.appendChild(script);
-      scriptElements.push(script);
-    });
+    if (!widget.scripts?.length) {
+      setFrameUrl(null);
+      if (blobRef.current) {
+        URL.revokeObjectURL(blobRef.current);
+        blobRef.current = null;
+      }
+      return;
+    }
+
+    const content = buildIframeContent(widget.html, widget.scripts);
+    const blob = new Blob([content], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    blobRef.current = url;
+    setFrameUrl(url);
+
     return () => {
-      scriptElements.forEach((script) => {
-        script.remove();
-      });
+      URL.revokeObjectURL(url);
+      if (blobRef.current === url) {
+        blobRef.current = null;
+      }
     };
-  }, [widget.id, widget.scripts?.join('::') ?? '', widget.lastUpdated]);
+  }, [widget.html, widget.scripts?.join('::') ?? '', widget.lastUpdated]);
 
   return (
     <article
@@ -110,10 +117,19 @@ export function WidgetWindow({
       </header>
 
       <section className="widget-body">
-        <div
-          className="widget-html"
-          dangerouslySetInnerHTML={{ __html: widget.html }}
-        />
+        {frameUrl ? (
+          <iframe
+            key={frameUrl}
+            className="widget-frame"
+            sandbox="allow-scripts allow-forms"
+            src={frameUrl}
+          />
+        ) : (
+          <div
+            className="widget-html"
+            dangerouslySetInnerHTML={{ __html: widget.html }}
+          />
+        )}
       </section>
 
       {widget.explanation ? (
@@ -129,4 +145,11 @@ export function WidgetWindow({
       />
     </article>
   );
+}
+
+function buildIframeContent(html: string, scripts: string[]): string {
+  const scriptTags = scripts
+    .map((code) => `<script>\n${code}\n<\/script>`)
+    .join('\n');
+  return `<!DOCTYPE html><html><head><meta charset="utf-8" /><style>html,body{margin:0;padding:0;font-family:inherit;background:transparent;color:inherit;}button,input{font:inherit;}</style></head><body>${html}${scriptTags}</body></html>`;
 }
