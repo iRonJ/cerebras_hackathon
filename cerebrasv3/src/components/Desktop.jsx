@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import WindowFrame from './WindowFrame';
 import Taskbar from './Taskbar';
 import DevDrawer from './DevDrawer';
-import AIWidget from './AIWidget';
+import AssistantBubble from './AssistantBubble';
 import { fetchWindowContent } from '../services/api';
 import '../styles/desktop.css';
 
@@ -44,36 +44,79 @@ const Desktop = () => {
       customCss: ''
     };
 
+
+
     setWindows([...windows, newWindow]);
     setNextZIndex(nextZIndex + 1);
   };
 
-  const openAIWidget = () => {
-    const id = 'ai-widget';
-    const existing = windows.find(w => w.id === id);
-    if (existing) {
-      focusWindow(id);
-      if (existing.isMinimized) toggleMinimize(id);
-      return;
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [refineTargetId, setRefineTargetId] = useState(null);
+  const [sessionId] = useState(() => 'session-' + Math.random().toString(36).substr(2, 9));
+
+  const [bubblePosition, setBubblePosition] = useState(null);
+
+  const openAssistant = (targetId = null) => {
+    setRefineTargetId(targetId);
+    if (targetId) {
+      const targetWindow = windows.find(w => w.id === targetId);
+      if (targetWindow) {
+        setBubblePosition({
+          top: targetWindow.y + 40, // Below title bar
+          left: targetWindow.x + targetWindow.width - 320 // Aligned to right
+        });
+      }
+    } else {
+      setBubblePosition(null); // Default position
     }
+    setAssistantOpen(true);
+  };
 
-    const newWindow = {
-      id,
-      title: 'AI Assistant',
-      component: <AIWidget onOpenWindow={openWindow} />,
-      x: 150,
-      y: 150,
-      width: 500,
-      height: 400,
-      zIndex: nextZIndex,
-      isMinimized: false,
-      isMaximized: false,
-      preMaximizeState: null,
-      customCss: ''
-    };
+  const handleAssistantSubmit = async (prompt, targetId) => {
+    try {
+      let contextSnapshot = {};
+      if (targetId) {
+        const targetWindow = windows.find(w => w.id === targetId);
+        if (targetWindow) {
+          contextSnapshot = {
+            current_content: targetWindow.content,
+            window_title: targetWindow.title
+          };
+        }
+      }
 
-    setWindows([...windows, newWindow]);
-    setNextZIndex(nextZIndex + 1);
+      const res = await fetch('/api/desktop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId,
+          intent: 'create_widget',
+          prompt,
+          targetWidgetId: targetId,
+          contextSnapshot
+        })
+      });
+      const data = await res.json();
+      if (data.widgets && data.widgets.length > 0) {
+        const widget = data.widgets[data.widgets.length - 1];
+
+        // If targetId matches, update existing window
+        if (targetId && windows.find(w => w.id === targetId)) {
+          updateWindowContent(targetId, widget.html);
+          // Optionally update title/size if provided
+          // But for now just content is fine
+        } else {
+          // Open new window
+          openWindow(widget.id, widget.title || 'AI Window', widget.html, {
+            width: widget.width,
+            height: widget.height
+          });
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Error communicating with AI');
+    }
   };
 
   const closeWindow = (id) => {
@@ -171,17 +214,32 @@ const Desktop = () => {
   return (
     <div className="desktop-container">
       {/* Desktop Icons (Shortcuts) */}
-      <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 20 }}>
-        <button onClick={() => openWindow('window-1', 'My App')} style={{ padding: 10, background: 'rgba(255,255,255,0.1)', color: 'white', border: 'none', borderRadius: 8 }}>
-          📁 Open App 1
-        </button>
-        <button onClick={() => openWindow('window-2', 'Clock')} style={{ padding: 10, background: 'rgba(255,255,255,0.1)', color: 'white', border: 'none', borderRadius: 8 }}>
-          ⏰ Open Clock
-        </button>
-        <button onClick={openAIWidget} style={{ padding: 10, background: 'rgba(255,255,255,0.1)', color: 'white', border: 'none', borderRadius: 8 }}>
-          🤖 AI Assistant
-        </button>
-      </div>
+      {/* Plus Widget */}
+      <button
+        onClick={() => openAssistant(null)}
+        style={{
+          position: 'absolute',
+          top: 20,
+          right: 20,
+          width: 40,
+          height: 40,
+          borderRadius: '50%',
+          background: '#007bff',
+          color: 'white',
+          border: 'none',
+          fontSize: '24px',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9000,
+          boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
+          padding: 0,
+          lineHeight: 1
+        }}
+      >
+        +
+      </button>
 
       {/* Dev Drawer Toggle */}
       <button
@@ -189,7 +247,7 @@ const Desktop = () => {
         style={{
           position: 'absolute',
           top: 20,
-          right: 20,
+          right: 80,
           padding: '8px 16px',
           background: 'rgba(0,0,0,0.5)',
           color: '#aaa',
@@ -211,10 +269,19 @@ const Desktop = () => {
           onMinimize={toggleMinimize}
           onMaximize={toggleMaximize}
           onFocus={focusWindow}
+          onRefine={openAssistant}
           updatePosition={updatePosition}
           updateSize={updateSize}
         />
       ))}
+
+      <AssistantBubble
+        isOpen={assistantOpen}
+        onClose={() => setAssistantOpen(false)}
+        onSubmit={handleAssistantSubmit}
+        targetId={refineTargetId}
+        position={bubblePosition}
+      />
 
       {/* Taskbar */}
       <Taskbar

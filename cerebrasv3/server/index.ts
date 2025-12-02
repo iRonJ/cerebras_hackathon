@@ -147,6 +147,7 @@ async function handleCreateWidget(
   const widget = composeWidget(
     llm,
     command.prompt ?? 'Untitled widget',
+    command.targetWidgetId,
   );
 
   sessionManager.upsertWidget(session, widget);
@@ -167,6 +168,7 @@ async function handleCreateWidget(
 function composeWidget(
   llm: WidgetLLMResponse,
   fallbackPrompt: string,
+  targetWidgetId?: string,
 ): WidgetContent {
   const html = typeof llm.HTMLText === 'string' ? llm.HTMLText : '';
   const prompt =
@@ -180,7 +182,7 @@ function composeWidget(
     typeof llm.contextKey === 'string' ? llm.contextKey : undefined;
 
   return {
-    id: `widget_${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`,
+    id: targetWidgetId ?? `widget_${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`,
     prompt,
     html: html || `<div class="empty-state">No HTML returned.</div>`,
     liveData,

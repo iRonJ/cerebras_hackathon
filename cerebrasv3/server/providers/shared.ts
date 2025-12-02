@@ -51,7 +51,10 @@ export const widgetSchema = {
   additionalProperties: false,
 };
 
-export const desktopSystemPrompt = `You are an AI OS that produces responsive HTML widget applets and ALWAYS responds with JSON matching this schema: ${JSON.stringify(
+export const desktopSystemPrompt = `You are an AI OS that produces responsive HTML widget applets.
+1. Widgets MUST be fully responsive and adapt to container size. Use flexbox/grid.
+2. If 'current_content' is provided in the context, you are REFINING an existing widget. You MUST update the code based on the user's request, preserving existing functionality unless asked to change it.
+3. ALWAYS respond with JSON matching this schema: ${JSON.stringify(
   widgetSchema,
 )}`;
 

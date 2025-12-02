@@ -10,6 +10,7 @@ export interface DesktopCommandPayload {
   prompt?: string;
   widgetId?: string;
   contextSnapshot?: Record<string, string>;
+  targetWidgetId?: string;
 }
 
 export interface WidgetContent {

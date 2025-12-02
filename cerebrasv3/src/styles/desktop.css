@@ -15,8 +15,9 @@
   background: transparent;
   border: none;
   box-shadow: none;
-  overflow: visible; 
-  transition: transform 0.1s; /* Smooth movement if needed */
+  overflow: visible;
+  transition: transform 0.1s;
+  /* Smooth movement if needed */
 }
 
 /* Window Inner (The actual window look) */
@@ -64,6 +65,7 @@
 .window-controls {
   display: flex;
   gap: 8px;
+  align-items: center;
 }
 
 .control-btn {
@@ -79,14 +81,23 @@
   transform: scale(1.1);
 }
 
-.control-btn.close { background: #ff5f56; }
-.control-btn.minimize { background: #ffbd2e; }
-.control-btn.maximize { background: #27c93f; }
+.control-btn.close {
+  background: #ff5f56;
+}
+
+.control-btn.minimize {
+  background: #ffbd2e;
+}
+
+.control-btn.maximize {
+  background: #27c93f;
+}
 
 .window-content {
   flex: 1;
   position: relative;
-  background: #fff; /* Content usually expects white bg */
+  background: #fff;
+  /* Content usually expects white bg */
 }
 
 .window-content iframe {
@@ -139,4 +150,26 @@
   background: rgba(100, 108, 255, 0.3);
   border-color: rgba(100, 108, 255, 0.5);
   box-shadow: 0 0 10px rgba(100, 108, 255, 0.3);
+}
+
+.control-btn.refine {
+  width: 24px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0;
+  opacity: 0.8;
+  margin-right: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.control-btn.refine:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.3);
 }
