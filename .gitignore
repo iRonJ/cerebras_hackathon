@@ -3,3 +3,4 @@ cerebras_os/bin/Debug/net8.0/*
 cerebras_os/obj/Debug/net8.0/*
 *.DS_Store
 **/.DS_Store
+**/node_modules/*
