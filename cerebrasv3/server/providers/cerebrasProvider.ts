@@ -49,34 +49,66 @@ export class CerebrasProvider implements DesktopModelProvider {
       content: `${userPrompt}\n\nReturn valid JSON only.`,
     });
 
-    const completion = (await this.client.chat.completions.create({
+    let attempts = 0;
+    while (attempts < 3) {
+      try {
+        const completion = (await this.client.chat.completions.create({
+          model: this.model,
+          temperature: 0.4,
+          response_format: {
+            type: 'json_schema',
+            json_schema: {
+              name: 'desktop_widget',
+              strict: true,
+              schema: widgetSchema,
+            },
+          },
+          messages,
+        })) as {
+          choices?: Array<{ message?: { content?: string } }>;
+        };
+
+        const assistantContent = completion.choices?.[0]?.message?.content;
+        if (!assistantContent) {
+          throw new Error('Cerebras chat API returned an empty response');
+        }
+        console.log('[CerebrasProvider] Raw Response:', assistantContent);
+
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(assistantContent);
+        } catch {
+          parsed = extractJsonPayload(assistantContent);
+        }
+
+        return parsed as WidgetLLMResponse;
+      } catch (error) {
+        attempts++;
+        console.error(`[CerebrasProvider] Attempt ${attempts} failed:`, error);
+
+        if (attempts >= 3) {
+          throw error;
+        }
+
+        // Add error to context for retry
+        messages.push({
+          role: 'user',
+          content: `Previous response failed to parse as JSON. Error: ${(error as Error).message}. Please fix the JSON and try again.`,
+        });
+      }
+    }
+    throw new Error('Failed to generate widget after 3 attempts');
+  }
+
+  async chat(systemPrompt: string, userPrompt: string): Promise<string> {
+    const completion = await this.client.chat.completions.create({
       model: this.model,
-      temperature: 0.4,
-      response_format: {
-        type: 'json_schema',
-        json_schema: {
-          name: 'desktop_widget',
-          strict: true,
-          schema: widgetSchema,
-        },
-      },
-      messages,
-    })) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-
-    const assistantContent = completion.choices?.[0]?.message?.content;
-    if (!assistantContent) {
-      throw new Error('Cerebras chat API returned an empty response');
-    }
-
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = JSON.parse(assistantContent);
-    } catch {
-      parsed = extractJsonPayload(assistantContent);
-    }
-
-    return parsed as WidgetLLMResponse;
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+    });
+    const response = completion as { choices: Array<{ message: { content: string } }> };
+    return response.choices[0]?.message?.content || '';
   }
 }

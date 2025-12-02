@@ -13,6 +13,7 @@ export interface DesktopModelProvider {
     userPrompt: string,
     contextSnapshot?: Record<string, string>,
   ): Promise<WidgetLLMResponse>;
+  chat(systemPrompt: string, userPrompt: string): Promise<string>;
 }
 
 export const widgetSchema = {
@@ -54,7 +55,8 @@ export const widgetSchema = {
 export const desktopSystemPrompt = `You are an AI OS that produces responsive HTML widget applets.
 1. Widgets MUST be fully responsive and adapt to container size. Use flexbox/grid.
 2. If 'current_content' is provided in the context, you are REFINING an existing widget. You MUST update the code based on the user's request, preserving existing functionality unless asked to change it.
-3. ALWAYS respond with JSON matching this schema: ${JSON.stringify(
+3. You can fetch data from local tools via '/api/mono/{tool_name}'. Available tools will be listed in the prompt. Use 'fetch' to call them.
+4. ALWAYS respond with JSON matching this schema: ${JSON.stringify(
   widgetSchema,
 )}`;
 

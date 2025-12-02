@@ -13,6 +13,8 @@ import {
   createModelProvider,
 } from './providers';
 import type { WidgetLLMResponse } from './providers/shared';
+import { ToolManager } from './toolManager';
+import { AIPlanner } from './aiPlanner';
 
 dotenv.config();
 
@@ -29,6 +31,15 @@ const backgroundLoop = new BackgroundContextLoop(
   sessionManager,
 );
 backgroundLoop.start();
+
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const toolManager = new ToolManager(__dirname);
+const aiPlanner = new AIPlanner(modelProvider, toolManager);
 
 const port = Number(process.env.DESKTOP_API_PORT) || 4000;
 
@@ -52,6 +63,36 @@ apiRouter.post('/desktop', async (req: Request, res: Response) => {
       error instanceof Error ? error.message : 'Desktop command failed';
     console.error('[desktop-api]', message);
     res.status(500).json({ error: message });
+  }
+});
+
+// Mono-API Handler
+apiRouter.use('/mono', async (req: Request, res: Response) => {
+  try {
+    const path = req.path; // This will be the path relative to /mono
+    console.log(`[mono-api] Handling ${req.method} ${path}`);
+
+    const plan = await aiPlanner.planRequest(req.method, path, req.query, req.body);
+    console.log('[mono-api] Plan:', plan);
+
+    if (plan.action === 'direct_response') {
+      res.json(plan.response);
+    } else if (plan.action === 'execute_tool') {
+      const result = await toolManager.executeTool(plan.toolName!, plan.toolArgs || {});
+      res.json({ result });
+    } else if (plan.action === 'create_tool') {
+      // Generate and register the tool
+      const toolDef = await aiPlanner.generateTool(JSON.stringify(plan.newToolDefinition));
+      await toolManager.registerTool(toolDef);
+
+      const result = await toolManager.executeTool(toolDef.name, plan.toolArgs || {});
+      res.json({ result });
+    } else {
+      res.status(500).json({ error: 'Unknown plan action' });
+    }
+  } catch (error) {
+    console.error('[mono-api] Error:', error);
+    res.status(500).json({ error: (error as Error).message });
   }
 });
 
@@ -138,9 +179,19 @@ async function handleCreateWidget(
     ...Object.fromEntries(session.context.entries()),
     ...(command.contextSnapshot ?? {}),
   };
+  console.log('[handleCreateWidget] Prompt:', command.prompt);
+  console.log('[handleCreateWidget] Context:', JSON.stringify(contextSnapshot, null, 2));
+
+  console.log('[handleCreateWidget] Context:', JSON.stringify(contextSnapshot, null, 2));
+
+  // Identify relevant tools (and generate new ones if needed)
+  const tools = await aiPlanner.identifyTools(command.prompt ?? '');
+  // Force the endpoint to be /api/mono/{name} so the frontend calls the correct URL
+  const toolsList = tools.map(t => `- ${t.name}: ${t.description} (Endpoint: /api/mono/${t.name})`).join('\n');
+  const promptWithTools = `${command.prompt ?? ''}\n\nAvailable Tools:\n${toolsList}`;
 
   const llm = await modelProvider.generateWidget(
-    command.prompt ?? '',
+    promptWithTools,
     contextSnapshot,
   );
 

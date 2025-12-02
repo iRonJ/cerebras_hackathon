@@ -85,16 +85,19 @@ const Desktop = () => {
         }
       }
 
+      const payload = {
+        sessionId,
+        intent: 'create_widget',
+        prompt,
+        targetWidgetId: targetId,
+        contextSnapshot
+      };
+      console.log('[Desktop] Sending request:', payload);
+
       const res = await fetch('/api/desktop', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId,
-          intent: 'create_widget',
-          prompt,
-          targetWidgetId: targetId,
-          contextSnapshot
-        })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (data.widgets && data.widgets.length > 0) {

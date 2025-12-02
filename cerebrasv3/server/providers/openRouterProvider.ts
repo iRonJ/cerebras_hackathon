@@ -25,7 +25,7 @@ export class OpenRouterProvider implements DesktopModelProvider {
   readonly name = 'openrouter';
   private readonly endpoint = 'https://openrouter.ai/api/v1/chat/completions';
 
-  constructor(private readonly apiKey?: string) {}
+  constructor(private readonly apiKey?: string) { }
 
   private ensureKey(): void {
     if (!this.apiKey) {
@@ -84,5 +84,35 @@ export class OpenRouterProvider implements DesktopModelProvider {
 
     const parsed = extractJsonPayload(content);
     return parsed as WidgetLLMResponse;
+  }
+
+  async chat(systemPrompt: string, userPrompt: string): Promise<string> {
+    this.ensureKey();
+    const response = await fetch(this.endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'qwen/qwen3-32b',
+        stream: false,
+        provider: { only: ['Cerebras'] },
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(
+        `OpenRouter request failed (${response.status}): ${errorBody}`,
+      );
+    }
+
+    const data = (await response.json()) as OpenRouterResponse;
+    return data.choices?.[0]?.message?.content ?? '';
   }
 }
