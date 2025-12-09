@@ -15,6 +15,9 @@ import {
 import type { WidgetLLMResponse } from './providers/shared';
 import { ToolManager } from './toolManager';
 import { AIPlanner } from './aiPlanner';
+import { RequestStateMachine } from './stateMachine';
+import { appCache } from './appCache';
+import { RegexLadder } from './regexLadder';
 
 dotenv.config();
 
@@ -40,6 +43,7 @@ const __dirname = dirname(__filename);
 
 const toolManager = new ToolManager(__dirname);
 const aiPlanner = new AIPlanner(modelProvider, toolManager);
+const regexLadder = new RegexLadder(__dirname);
 
 const port = Number(process.env.DESKTOP_API_PORT) || 4000;
 
@@ -48,6 +52,7 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 apiRouter.post('/desktop', async (req: Request, res: Response) => {
+  const start = Date.now();
   const payload = req.body as DesktopCommandPayload | undefined;
   if (!payload?.sessionId) {
     res.status(400).json({ error: 'sessionId is required' });
@@ -57,6 +62,7 @@ apiRouter.post('/desktop', async (req: Request, res: Response) => {
   try {
     const session = sessionManager.getOrCreate(payload.sessionId);
     const response = await handleIntent(session, payload);
+    console.log(`[desktop-api] Request processed in ${Date.now() - start}ms`);
     res.json(response);
   } catch (error) {
     const message =
@@ -66,35 +72,58 @@ apiRouter.post('/desktop', async (req: Request, res: Response) => {
   }
 });
 
-// Mono-API Handler
-apiRouter.use('/mono', async (req: Request, res: Response) => {
+// Frontend Status Polling endpoint
+apiRouter.post('/poll', async (req: Request, res: Response) => {
   try {
-    const path = req.path; // This will be the path relative to /mono
+    const { sessionId, appIds } = req.body as { sessionId?: string; appIds?: string[] };
+
+    if (!sessionId) {
+      res.status(400).json({ error: 'sessionId is required' });
+      return;
+    }
+
+    const machine = new RequestStateMachine(toolManager, aiPlanner, appCache, regexLadder);
+    const result = await machine.handlePoll(sessionId, appIds || []);
+
+    console.log(`[poll-api] Session ${sessionId}: ${result.updatedApps.length} updated, ${result.removedAppIds.length} removed`);
+    res.json(result);
+  } catch (error) {
+    console.error('[poll-api] Error:', error);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+// Mono-API Handler - Now using the state machine
+apiRouter.use('/mono', async (req: Request, res: Response) => {
+  const start = Date.now();
+  try {
+    const path = req.baseUrl + req.path;
     console.log(`[mono-api] Handling ${req.method} ${path}`);
 
-    const plan = await aiPlanner.planRequest(req.method, path, req.query, req.body);
-    console.log('[mono-api] Plan:', plan);
+    // Create state machine instance for this request
+    const machine = new RequestStateMachine(toolManager, aiPlanner, appCache, regexLadder);
 
-    if (plan.action === 'direct_response') {
-      res.json(plan.response);
-    } else if (plan.action === 'execute_tool') {
-      const result = await toolManager.executeTool(plan.toolName!, plan.toolArgs || {});
-      res.json({ result });
-    } else if (plan.action === 'create_tool') {
-      // Generate and register the tool
-      const toolDef = await aiPlanner.generateTool(JSON.stringify(plan.newToolDefinition));
-      await toolManager.registerTool(toolDef);
+    const result = await machine.process({
+      method: req.method,
+      path,
+      query: req.query as Record<string, any>,
+      body: req.body,
+      sessionId: resolveSessionId(req),
+    });
 
-      const result = await toolManager.executeTool(toolDef.name, plan.toolArgs || {});
-      res.json({ result });
+    console.log(`[mono-api] State machine completed in ${Date.now() - start}ms, state: ${result.state}`);
+
+    if (result.success) {
+      res.json(result.response);
     } else {
-      res.status(500).json({ error: 'Unknown plan action' });
+      res.status(500).json({ error: result.error || 'Request processing failed' });
     }
   } catch (error) {
     console.error('[mono-api] Error:', error);
     res.status(500).json({ error: (error as Error).message });
   }
 });
+
 
 apiRouter.use(async (req: Request, res: Response) => {
   const sessionId = resolveSessionId(req);
@@ -133,9 +162,10 @@ apiRouter.use(async (req: Request, res: Response) => {
 
 app.use('/api', apiRouter);
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`Desktop AI API listening on http://localhost:${port}`);
 });
+server.setTimeout(300000); // 5 minutes
 
 async function handleIntent(
   session: ReturnType<DesktopSessionManager['getOrCreate']>,
@@ -182,18 +212,24 @@ async function handleCreateWidget(
   console.log('[handleCreateWidget] Prompt:', command.prompt);
   console.log('[handleCreateWidget] Context:', JSON.stringify(contextSnapshot, null, 2));
 
-  console.log('[handleCreateWidget] Context:', JSON.stringify(contextSnapshot, null, 2));
+  // Note: Error diagnosis is now handled by the AI classifyIntent in the state machine
+  // when the diagnose_error intent is detected. No manual regex parsing needed.
 
   // Identify relevant tools (and generate new ones if needed)
+  const t0 = Date.now();
   const tools = await aiPlanner.identifyTools(command.prompt ?? '');
+  console.log(`[handleCreateWidget] identifyTools took ${Date.now() - t0}ms`);
+
   // Force the endpoint to be /api/mono/{name} so the frontend calls the correct URL
-  const toolsList = tools.map(t => `- ${t.name}: ${t.description} (Endpoint: /api/mono/${t.name})`).join('\n');
+  const toolsList = tools.map(t => `- ${t.name}: ${t.description} (Endpoint: /api/mono/${t.name}) ${t.responseSample ? `[Sample Output: ${t.responseSample}]` : ''}`).join('\n');
   const promptWithTools = `${command.prompt ?? ''}\n\nAvailable Tools:\n${toolsList}`;
 
+  const t1 = Date.now();
   const llm = await modelProvider.generateWidget(
     promptWithTools,
     contextSnapshot,
   );
+  console.log(`[handleCreateWidget] generateWidget took ${Date.now() - t1}ms`);
 
   const widget = composeWidget(
     llm,

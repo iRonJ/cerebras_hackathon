@@ -78,9 +78,15 @@ const Desktop = () => {
       if (targetId) {
         const targetWindow = windows.find(w => w.id === targetId);
         if (targetWindow) {
+          // Extract tools used from the content by finding fetch calls to /api/mono/
+          const content = targetWindow.content || '';
+          const toolMatches = content.match(/\/api\/mono\/([a-z_]+)/gi) || [];
+          const toolsUsed = [...new Set(toolMatches.map(m => m.replace('/api/mono/', '')))].join(',');
+
           contextSnapshot = {
-            current_content: targetWindow.content,
-            window_title: targetWindow.title
+            current_content: content,
+            window_title: targetWindow.title,
+            tools_used: toolsUsed
           };
         }
       }
@@ -101,20 +107,47 @@ const Desktop = () => {
       });
       const data = await res.json();
       if (data.widgets && data.widgets.length > 0) {
-        const widget = data.widgets[data.widgets.length - 1];
+        setWindows(prevWindows => {
+          let newWindows = [...prevWindows];
+          let currentZIndex = nextZIndex;
 
-        // If targetId matches, update existing window
-        if (targetId && windows.find(w => w.id === targetId)) {
-          updateWindowContent(targetId, widget.html);
-          // Optionally update title/size if provided
-          // But for now just content is fine
-        } else {
-          // Open new window
-          openWindow(widget.id, widget.title || 'AI Window', widget.html, {
-            width: widget.width,
-            height: widget.height
+          data.widgets.forEach(widget => {
+            const existingIndex = newWindows.findIndex(w => w.id === widget.id);
+
+            if (existingIndex !== -1) {
+              // Update existing window
+              newWindows[existingIndex] = {
+                ...newWindows[existingIndex],
+                content: widget.html,
+                title: widget.title || newWindows[existingIndex].title,
+                zIndex: currentZIndex++,
+                isMinimized: false
+              };
+              if (widget.width) newWindows[existingIndex].width = widget.width;
+              if (widget.height) newWindows[existingIndex].height = widget.height;
+            } else {
+              // Create new window
+              newWindows.push({
+                id: widget.id,
+                title: widget.title || 'AI Window',
+                content: widget.html,
+                x: 100 + (newWindows.length * 30),
+                y: 100 + (newWindows.length * 30),
+                width: widget.width || 400,
+                height: widget.height || 300,
+                zIndex: currentZIndex++,
+                isMinimized: false,
+                isMaximized: false,
+                preMaximizeState: null,
+                customCss: ''
+              });
+            }
           });
-        }
+
+          return newWindows;
+        });
+
+        setNextZIndex(prev => prev + data.widgets.length);
       }
     } catch (err) {
       console.error(err);
@@ -122,8 +155,23 @@ const Desktop = () => {
     }
   };
 
-  const closeWindow = (id) => {
+  const closeWindow = async (id) => {
+    // Optimistically close locally
     setWindows(windows.filter(w => w.id !== id));
+
+    try {
+      await fetch('/api/desktop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId,
+          intent: 'close_widget',
+          widgetId: id
+        })
+      });
+    } catch (err) {
+      console.error('Failed to close widget on server:', err);
+    }
   };
 
   const focusWindow = (id) => {

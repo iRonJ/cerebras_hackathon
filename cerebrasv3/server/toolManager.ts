@@ -11,20 +11,32 @@ export interface ToolDefinition {
     apiEndpoint: string;
     command: string;
     responseType: 'string' | 'list' | 'json';
+    responseSample?: string;
     code?: string; // Content of the script
     language?: 'python' | 'shell';
 }
+
+// Path to the venv python - can be overridden via PYTHON_PATH env var
+const PYTHON_PATH = process.env.PYTHON_PATH || '.venv/bin/python3';
 
 export class ToolManager {
     private toolsDir: string;
     private indexPath: string;
     private tools: Map<string, ToolDefinition>;
+    private lastExecutedCommand: string = '';
+    private pythonPath: string;
 
     constructor(serverRoot: string) {
         this.toolsDir = path.join(serverRoot, 'tools');
         this.indexPath = path.join(serverRoot, 'tools.md');
+        this.pythonPath = path.join(serverRoot, PYTHON_PATH);
         this.tools = new Map();
         this.loadTools();
+        console.log(`[ToolManager] Using Python: ${this.pythonPath}`);
+    }
+
+    getLastCommand(): string {
+        return this.lastExecutedCommand;
     }
 
     private loadTools() {
@@ -49,6 +61,7 @@ export class ToolManager {
                     if (key === 'api endpoint') tool.apiEndpoint = value;
                     if (key === 'command') tool.command = value.replace(/`/g, '');
                     if (key === 'response type') tool.responseType = value.toLowerCase() as any;
+                    if (key === 'response sample') tool.responseSample = value.replace(/`/g, '');
                 }
             }
 
@@ -89,6 +102,7 @@ export class ToolManager {
 - **API Endpoint**: ${tool.apiEndpoint}
 - **Command**: \`${tool.command}\`
 - **Response Type**: ${tool.responseType}
+- **Response Sample**: \`${tool.responseSample || ''}\`
 - **Created**: ${new Date().toISOString()}
 `;
         fs.appendFileSync(this.indexPath, entry);
@@ -104,12 +118,26 @@ export class ToolManager {
         }
 
         let command = tool.command;
-        // Replace placeholders {arg} with actual values
+
+        // Replace python3 with venv python path
+        command = command.replace(/^python3\s/, `${this.pythonPath} `);
+
+        // Replace placeholders {arg} with actual values, properly quoted for shell
         console.log(`[ToolManager] Executing ${name} with args:`, args);
         for (const [key, value] of Object.entries(args)) {
-            command = command.replace(`{${key}}`, value);
+            // Handle empty values - use '.' for path, or quote empty string
+            let finalValue = value;
+            if (value === '' || value === undefined || value === null) {
+                finalValue = key === 'path' ? '.' : "''";  // Default path to current dir
+            } else {
+                // Quote values that contain spaces or special shell characters
+                const needsQuoting = /[\s"'`$\\|&;<>(){}\[\]*?!#~]/.test(value);
+                finalValue = needsQuoting ? `'${value.replace(/'/g, "'\\''")}'` : value;
+            }
+            command = command.replace(`{${key}}`, finalValue);
         }
         console.log(`[ToolManager] Command: ${command}`);
+        this.lastExecutedCommand = command;  // Track for repair agent
 
         // Ensure command runs from server root so paths like 'tools/script.py' work
         try {
