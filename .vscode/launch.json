@@ -57,6 +57,45 @@
                 "<node_internals>/**"
             ],
             "envFile": "${workspaceFolder}/cerebrasv2/.env"
+        },
+        {
+            "name": "Debug Server v3",
+            "type": "node",
+            "request": "launch",
+            "runtimeExecutable": "${workspaceFolder}/cerebrasv3/node_modules/.bin/tsx",
+            "args": [
+                "server/index.ts"
+            ],
+            "cwd": "${workspaceFolder}/cerebrasv3",
+            "envFile": "${workspaceFolder}/cerebrasv3/.env",
+            "env": {
+                "NODE_ENV": "development"
+            },
+            "console": "integratedTerminal",
+            "internalConsoleOptions": "neverOpen",
+            "skipFiles": [
+                "<node_internals>/**",
+                "**/node_modules/**"
+            ],
+            "sourceMaps": true,
+            "resolveSourceMapLocations": [
+                "${workspaceFolder}/cerebrasv3/**",
+                "!**/node_modules/**"
+            ]
+        },
+        {
+            "name": "Launch Full Stack v3",
+            "type": "node",
+            "request": "launch",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": [
+                "run",
+                "dev"
+            ],
+            "cwd": "${workspaceFolder}/cerebrasv3",
+            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/cerebrasv3/.env"
         }
+        
     ]
 }

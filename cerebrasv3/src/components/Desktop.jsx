@@ -79,14 +79,15 @@ const Desktop = () => {
         const targetWindow = windows.find(w => w.id === targetId);
         if (targetWindow) {
           // Extract tools used from the content by finding fetch calls to /api/mono/
+          // Note: We don't send current_content because server caches it in session.widgets
           const content = targetWindow.content || '';
           const toolMatches = content.match(/\/api\/mono\/([a-z_]+)/gi) || [];
           const toolsUsed = [...new Set(toolMatches.map(m => m.replace('/api/mono/', '')))].join(',');
 
           contextSnapshot = {
-            current_content: content,
             window_title: targetWindow.title,
             tools_used: toolsUsed
+            // current_content is NOT sent - server retrieves from session.widgets cache
           };
         }
       }
@@ -115,16 +116,23 @@ const Desktop = () => {
             const existingIndex = newWindows.findIndex(w => w.id === widget.id);
 
             if (existingIndex !== -1) {
-              // Update existing window
+              // Update existing window - ONLY update content and metadata, preserve position!
+              const existing = newWindows[existingIndex];
               newWindows[existingIndex] = {
-                ...newWindows[existingIndex],
+                ...existing,  // Preserve ALL existing properties first (x, y, width, height, etc.)
                 content: widget.html,
-                title: widget.title || newWindows[existingIndex].title,
+                title: widget.title || existing.title,
                 zIndex: currentZIndex++,
                 isMinimized: false
+                // Explicitly NOT setting x, y, width, height to preserve user's positioning
               };
-              if (widget.width) newWindows[existingIndex].width = widget.width;
-              if (widget.height) newWindows[existingIndex].height = widget.height;
+              // Only update size if explicitly provided by server AND different
+              if (widget.width && widget.width !== existing.width) {
+                newWindows[existingIndex].width = widget.width;
+              }
+              if (widget.height && widget.height !== existing.height) {
+                newWindows[existingIndex].height = widget.height;
+              }
             } else {
               // Create new window
               newWindows.push({

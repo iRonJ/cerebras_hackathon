@@ -1,0 +1,1174 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Polygon Projection Mapper - WebGL</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+
+        .sidebar {
+            width: 320px;
+            background: #252525;
+            padding: 20px;
+            overflow-y: auto;
+            border-right: 1px solid #333;
+            transition: transform 0.3s ease;
+        }
+
+        .sidebar.collapsed {
+            transform: translateX(-100%);
+        }
+
+        .workspace {
+            flex: 1;
+            position: relative;
+            background: #0a0a0a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .canvas-container {
+            position: relative;
+            width: 95%;
+            height: 95%;
+            max-width: 1600px;
+            max-height: 1200px;
+            background: #111;
+            border: 2px solid #333;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        #webglCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .vertex {
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            background: #00ff88;
+            border: 3px solid #fff;
+            border-radius: 50%;
+            cursor: move;
+            transform: translate(-50%, -50%);
+            z-index: 10;
+            transition: transform 0.1s ease, opacity 0.2s ease;
+            box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+        }
+
+        .vertex:hover {
+            transform: translate(-50%, -50%) scale(1.2);
+            background: #00ffaa;
+            box-shadow: 0 0 15px rgba(0, 255, 136, 0.8);
+        }
+
+        .vertex.dragging {
+            background: #ff6600;
+            transform: translate(-50%, -50%) scale(1.3);
+            box-shadow: 0 0 20px rgba(255, 102, 0, 0.8);
+        }
+
+        .vertex.selected {
+            background: #ff00ff;
+            border-color: #ff88ff;
+            box-shadow: 0 0 15px rgba(255, 0, 255, 0.8);
+        }
+
+        .vertex.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .control-group {
+            margin-bottom: 20px;
+        }
+
+        .control-group h3 {
+            margin-bottom: 10px;
+            color: #00ff88;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 10px;
+            background: #333;
+            color: #fff;
+            border: 1px solid #444;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s ease;
+            margin-bottom: 8px;
+        }
+
+        .btn:hover {
+            background: #444;
+            border-color: #00ff88;
+        }
+
+        .btn.active {
+            background: #00ff88;
+            color: #000;
+            border-color: #00ff88;
+        }
+
+        .btn-primary {
+            background: #00ff88;
+            color: #000;
+            border-color: #00ff88;
+        }
+
+        .btn-primary:hover {
+            background: #00ffaa;
+        }
+
+        .btn-danger {
+            background: #ff4444;
+            color: #fff;
+            border-color: #ff4444;
+        }
+
+        .btn-danger:hover {
+            background: #ff6666;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .file-label {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            background: #333;
+            color: #fff;
+            border: 1px solid #444;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            text-align: center;
+            transition: all 0.2s ease;
+            margin-bottom: 8px;
+        }
+
+        .file-label:hover {
+            background: #444;
+            border-color: #00ff88;
+        }
+
+        .info-text {
+            font-size: 12px;
+            color: #888;
+            margin-top: 5px;
+        }
+
+        .toggle-sidebar {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            background: #333;
+            border: 1px solid #444;
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            opacity: 1;
+            transition: opacity 0.3s ease;
+        }
+
+        .toggle-sidebar:hover {
+            background: #444;
+            border-color: #00ff88;
+        }
+
+        .toggle-sidebar.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .fullscreen-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+            background: #333;
+            border: 1px solid #444;
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .fullscreen-btn:hover {
+            background: #444;
+            border-color: #00ff88;
+        }
+
+        .quality-selector {
+            margin-bottom: 10px;
+        }
+
+        .quality-selector select {
+            width: 100%;
+            padding: 8px;
+            background: #333;
+            color: #fff;
+            border: 1px solid #444;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .performance-info {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #00ff88;
+            z-index: 50;
+        }
+
+        .polygon-list {
+            max-height: 200px;
+            overflow-y: auto;
+            margin-bottom: 10px;
+        }
+
+        .polygon-item {
+            padding: 8px;
+            background: #333;
+            border: 1px solid #444;
+            border-radius: 4px;
+            margin-bottom: 5px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .polygon-item:hover {
+            background: #444;
+            border-color: #00ff88;
+        }
+
+        .polygon-item.selected {
+            background: #00ff88;
+            color: #000;
+            border-color: #00ff88;
+        }
+
+        .polygon-name {
+            font-size: 14px;
+        }
+
+        .polygon-media {
+            font-size: 12px;
+            color: #888;
+        }
+
+        .delete-polygon {
+            background: #ff4444;
+            color: #fff;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .delete-polygon:hover {
+            background: #ff6666;
+        }
+
+        /* Fullscreen styles - only canvas visible */
+        body:fullscreen .container {
+            width: 100vw;
+            height: 100vh;
+        }
+
+        body:-webkit-full-screen .container {
+            width: 100vw;
+            height: 100vh;
+        }
+
+        body:-moz-full-screen .container {
+            width: 100vw;
+            height: 100vh;
+        }
+
+        body:-ms-fullscreen .container {
+            width: 100vw;
+            height: 100vh;
+        }
+
+        body:fullscreen .workspace {
+            width: 100vw;
+            height: 100vh;
+            background: #000;
+        }
+
+        body:-webkit-full-screen .workspace {
+            width: 100vw;
+            height: 100vh;
+            background: #000;
+        }
+
+        body:-moz-full-screen .workspace {
+            width: 100vw;
+            height: 100vh;
+            background: #000;
+        }
+
+        body:-ms-fullscreen .workspace {
+            width: 100vw;
+            height: 100vh;
+            background: #000;
+        }
+
+        body:fullscreen .canvas-container {
+            width: 100vw;
+            height: 100vh;
+            max-width: none;
+            max-height: none;
+            border: none;
+            border-radius: 0;
+            background: #000;
+        }
+
+        body:-webkit-full-screen .canvas-container {
+            width: 100vw;
+            height: 100vh;
+            max-width: none;
+            max-height: none;
+            border: none;
+            border-radius: 0;
+            background: #000;
+        }
+
+        body:-moz-full-screen .canvas-container {
+            width: 100vw;
+            height: 100vh;
+            max-width: none;
+            max-height: none;
+            border: none;
+            border-radius: 0;
+            background: #000;
+        }
+
+        body:-ms-fullscreen .canvas-container {
+            width: 100vw;
+            height: 100vh;
+            max-width: none;
+            max-height: none;
+            border: none;
+            border-radius: 0;
+            background: #000;
+        }
+
+        body:fullscreen .sidebar {
+            display: none;
+        }
+
+        body:-webkit-full-screen .sidebar {
+            display: none;
+        }
+
+        body:-moz-full-screen .sidebar {
+            display: none;
+        }
+
+        body:-ms-fullscreen .sidebar {
+            display: none;
+        }
+
+        body:fullscreen .performance-info,
+        body:fullscreen .fullscreen-btn {
+            display: none;
+        }
+
+        body:-webkit-full-screen .performance-info,
+        body:-webkit-full-screen .fullscreen-btn {
+            display: none;
+        }
+
+        body:-moz-full-screen .performance-info,
+        body:-moz-full-screen .fullscreen-btn {
+            display: none;
+        }
+
+        body:-ms-fullscreen .performance-info,
+        body:-ms-fullscreen .fullscreen-btn {
+            display: none;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 280px;
+            }
+
+            .canvas-container {
+                width: 95%;
+                height: 95%;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <button class="toggle-sidebar" id="toggleSidebarBtn" onclick="toggleSidebar()">☰</button>
+        <button class="fullscreen-btn" onclick="toggleBrowserFullscreen()">⛶ Fullscreen</button>
+
+        <div class="sidebar" id="sidebar">
+            <div class="control-group">
+                <h3>Polygons</h3>
+                <div class="polygon-list" id="polygonList"></div>
+                <button class="btn btn-primary" onclick="addPolygon()">+ Add Polygon</button>
+            </div>
+
+            <div class="control-group">
+                <h3>Media Source</h3>
+                <label for="fileInput" class="file-label">Upload Image/Video</label>
+                <input type="file" id="fileInput" accept="image/*,video/*">
+                <div class="info-text" id="fileInfo">No file loaded</div>
+            </div>
+
+            <div class="control-group">
+                <h3>Quality Settings</h3>
+                <div class="quality-selector">
+                    <select id="qualitySelect" onchange="updateQuality()">
+                        <option value="low">Low (50x50)</option>
+                        <option value="medium" selected>Medium (100x100)</option>
+                        <option value="high">High (200x200)</option>
+                        <option value="ultra">Ultra (400x400)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <h3>Mapping Mode</h3>
+                <button class="btn active" id="perspectiveBtn" onclick="setMappingMode('perspective')">Perspective (Fit
+                    Inside)</button>
+                <button class="btn" id="stretchBtn" onclick="setMappingMode('stretch')">Stretch to Corners</button>
+            </div>
+
+            <div class="control-group">
+                <h3>Polygon Actions</h3>
+                <button class="btn btn-primary" onclick="exportImage()">Export High-Res Image</button>
+                <button class="btn" onclick="resetCurrentPolygon()">Reset Current Polygon</button>
+            </div>
+        </div>
+
+        <div class="workspace">
+            <div class="canvas-container" id="canvasContainer">
+                <canvas id="webglCanvas"></canvas>
+            </div>
+            <div class="performance-info" id="performanceInfo">
+                FPS: <span id="fpsCounter">60</span> | Polygons: <span id="polygonCount">0</span> | Engine: WebGL
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let polygons = [];
+        let selectedPolygonIndex = -1;
+        let previousSelectedIndex = 0;
+        let mappingMode = 'perspective';
+        let quality = 'medium';
+        let isDragging = false;
+        let dragVertex = -1;
+        let animationId = null;
+        let lastTime = performance.now();
+        let fps = 60;
+        let verticesVisible = true;
+        let mouseTimer = null;
+        let isFullscreen = false;
+
+        const webglCanvas = document.getElementById('webglCanvas');
+        const gl = webglCanvas.getContext('webgl');
+
+        // WebGL shader sources
+        const vertexShaderSource = `
+            attribute vec2 a_position;
+            attribute vec2 a_texCoord;
+            uniform vec2 u_resolution;
+            varying vec2 v_texCoord;
+            
+            void main() {
+                vec2 clipSpace = ((a_position / u_resolution) * 2.0) - 1.0;
+                gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+                v_texCoord = a_texCoord;
+            }
+        `;
+
+        const fragmentShaderSource = `
+            precision mediump float;
+            uniform sampler2D u_texture;
+            varying vec2 v_texCoord;
+            
+            void main() {
+                gl_FragColor = texture2D(u_texture, v_texCoord);
+            }
+        `;
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('Shader compilation error:', gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        function createProgram(gl, vertexShader, fragmentShader) {
+            const program = gl.createProgram();
+            gl.attachShader(program, vertexShader);
+            gl.attachShader(program, fragmentShader);
+            gl.linkProgram(program);
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                console.error('Program linking error:', gl.getProgramInfoLog(program));
+                gl.deleteProgram(program);
+                return null;
+            }
+            return program;
+        }
+
+        let webglProgram = null;
+
+        function initWebGL() {
+            const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+            const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+            webglProgram = createProgram(gl, vertexShader, fragmentShader);
+        }
+
+        function resizeCanvas() {
+            const container = document.getElementById('canvasContainer');
+            const rect = container.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+
+            webglCanvas.width = rect.width * dpr;
+            webglCanvas.height = rect.height * dpr;
+            webglCanvas.style.width = rect.width + 'px';
+            webglCanvas.style.height = rect.height + 'px';
+
+            if (gl) {
+                gl.viewport(0, 0, webglCanvas.width, webglCanvas.height);
+            }
+
+            render();
+        }
+
+        function getQualityValue() {
+            const qualityMap = {
+                'low': 50,
+                'medium': 100,
+                'high': 200,
+                'ultra': 400
+            };
+            return qualityMap[quality] || 100;
+        }
+
+        function createPolygon(name) {
+            return {
+                id: Date.now(),
+                name: name || `Polygon ${polygons.length + 1}`,
+                vertices: [
+                    { x: 0.2, y: 0.2 },
+                    { x: 0.8, y: 0.2 },
+                    { x: 0.8, y: 0.8 },
+                    { x: 0.2, y: 0.8 }
+                ],
+                media: null,
+                mediaType: null,
+                texture: null,
+                textureAspectRatio: 1.0,
+                videoReady: false
+            };
+        }
+
+        function addPolygon() {
+            const polygon = createPolygon();
+            polygons.push(polygon);
+            selectedPolygonIndex = polygons.length - 1;
+            previousSelectedIndex = selectedPolygonIndex;
+            updatePolygonList();
+            createVertexElements();
+            updatePolygonCount();
+        }
+
+        function deletePolygon(index) {
+            if (polygons[index].texture) {
+                gl.deleteTexture(polygons[index].texture);
+            }
+            if (polygons[index].media && polygons[index].mediaType === 'video') {
+                polygons[index].media.pause();
+                URL.revokeObjectURL(polygons[index].media.src);
+            }
+            polygons.splice(index, 1);
+            if (selectedPolygonIndex >= polygons.length) {
+                selectedPolygonIndex = polygons.length - 1;
+            }
+            previousSelectedIndex = selectedPolygonIndex;
+            updatePolygonList();
+            createVertexElements();
+            updatePolygonCount();
+        }
+
+        function selectPolygon(index) {
+            selectedPolygonIndex = index;
+            previousSelectedIndex = index;
+            updatePolygonList();
+            createVertexElements();
+
+            const polygon = polygons[index];
+            if (polygon.media) {
+                document.getElementById('fileInfo').textContent = `Loaded: ${polygon.media.name || 'Media'}`;
+            } else {
+                document.getElementById('fileInfo').textContent = 'No file loaded';
+            }
+        }
+
+        function updatePolygonList() {
+            const list = document.getElementById('polygonList');
+            list.innerHTML = '';
+
+            polygons.forEach((polygon, index) => {
+                const item = document.createElement('div');
+                item.className = 'polygon-item';
+                if (index === selectedPolygonIndex) {
+                    item.classList.add('selected');
+                }
+
+                const content = document.createElement('div');
+                content.innerHTML = `
+                    <div class="polygon-name">${polygon.name}</div>
+                    <div class="polygon-media">${polygon.media ? polygon.media.name : 'No media'}</div>
+                `;
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'delete-polygon';
+                deleteBtn.textContent = 'Delete';
+                deleteBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    deletePolygon(index);
+                };
+
+                item.appendChild(content);
+                item.appendChild(deleteBtn);
+                item.onclick = () => selectPolygon(index);
+
+                list.appendChild(item);
+            });
+        }
+
+        function createVertexElements() {
+            const existingVertices = document.querySelectorAll('.vertex');
+            existingVertices.forEach(v => v.remove());
+
+            if (selectedPolygonIndex === -1 || isFullscreen) return;
+
+            const polygon = polygons[selectedPolygonIndex];
+            const container = document.getElementById('canvasContainer');
+
+            polygon.vertices.forEach((vertex, index) => {
+                const vertexEl = document.createElement('div');
+                vertexEl.className = 'vertex';
+                vertexEl.id = `vertex${index}`;
+                vertexEl.style.left = (vertex.x * 100) + '%';
+                vertexEl.style.top = (vertex.y * 100) + '%';
+
+                if (!verticesVisible) {
+                    vertexEl.classList.add('hidden');
+                }
+
+                vertexEl.addEventListener('mousedown', function (e) {
+                    isDragging = true;
+                    dragVertex = index;
+                    vertexEl.classList.add('dragging');
+                    e.preventDefault();
+                    e.stopPropagation();
+                });
+
+                container.appendChild(vertexEl);
+            });
+        }
+
+        function updateVertexPositions() {
+            if (selectedPolygonIndex === -1) return;
+
+            const polygon = polygons[selectedPolygonIndex];
+
+            polygon.vertices.forEach((vertex, index) => {
+                const vertexEl = document.getElementById(`vertex${index}`);
+                if (vertexEl) {
+                    vertexEl.style.left = (vertex.x * 100) + '%';
+                    vertexEl.style.top = (vertex.y * 100) + '%';
+                }
+            });
+        }
+
+        function toggleVerticesVisibility(visible) {
+            verticesVisible = visible;
+            const vertices = document.querySelectorAll('.vertex');
+            vertices.forEach(vertex => {
+                if (visible) {
+                    vertex.classList.remove('hidden');
+                } else {
+                    vertex.classList.add('hidden');
+                }
+            });
+        }
+
+        function renderWebGL() {
+            if (!webglProgram) return;
+
+            const container = document.getElementById('canvasContainer');
+            const rect = container.getBoundingClientRect();
+
+            gl.clearColor(0, 0, 0, 1);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+            polygons.forEach(polygon => {
+                if (!polygon.media || !polygon.videoReady) return;
+
+                gl.useProgram(webglProgram);
+
+                const positionLocation = gl.getAttribLocation(webglProgram, 'a_position');
+                const texCoordLocation = gl.getAttribLocation(webglProgram, 'a_texCoord');
+                const resolutionLocation = gl.getUniformLocation(webglProgram, 'u_resolution');
+
+                gl.uniform2f(resolutionLocation, webglCanvas.width, webglCanvas.height);
+
+                const subdivisions = getQualityValue();
+                const positions = [];
+                const texCoords = [];
+                const indices = [];
+
+                for (let y = 0; y <= subdivisions; y++) {
+                    for (let x = 0; x <= subdivisions; x++) {
+                        const px = x / subdivisions;
+                        const py = y / subdivisions;
+                        const point = interpolatePoint(px, py, polygon.vertices);
+                        positions.push(point.x * (window.devicePixelRatio || 1), point.y * (window.devicePixelRatio || 1));
+
+                        if (polygon.textureAspectRatio > 1) {
+                            texCoords.push(px, py / polygon.textureAspectRatio);
+                        } else {
+                            texCoords.push(px * polygon.textureAspectRatio, py);
+                        }
+                    }
+                }
+
+                for (let y = 0; y < subdivisions; y++) {
+                    for (let x = 0; x < subdivisions; x++) {
+                        const topLeft = y * (subdivisions + 1) + x;
+                        const topRight = topLeft + 1;
+                        const bottomLeft = (y + 1) * (subdivisions + 1) + x;
+                        const bottomRight = bottomLeft + 1;
+
+                        indices.push(topLeft, bottomLeft, topRight);
+                        indices.push(topRight, bottomLeft, bottomRight);
+                    }
+                }
+
+                const positionBuffer = gl.createBuffer();
+                gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+                gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+                gl.enableVertexAttribArray(positionLocation);
+                gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+                const texCoordBuffer = gl.createBuffer();
+                gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+                gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(texCoords), gl.STATIC_DRAW);
+                gl.enableVertexAttribArray(texCoordLocation);
+                gl.vertexAttribPointer(texCoordLocation, 2, gl.FLOAT, false, 0, 0);
+
+                const indexBuffer = gl.createBuffer();
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+                gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+
+                gl.activeTexture(gl.TEXTURE0);
+                gl.bindTexture(gl.TEXTURE_2D, polygon.texture);
+
+                if (polygon.mediaType === 'image') {
+                    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, polygon.media);
+                } else if (polygon.mediaType === 'video' && polygon.videoReady) {
+                    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, polygon.media);
+                }
+
+                gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
+            });
+        }
+
+        function interpolatePoint(x, y, vertices) {
+            const container = document.getElementById('canvasContainer');
+            const rect = container.getBoundingClientRect();
+
+            if (mappingMode === 'perspective') {
+                const topLeft = { x: vertices[0].x * rect.width, y: vertices[0].y * rect.height };
+                const topRight = { x: vertices[1].x * rect.width, y: vertices[1].y * rect.height };
+                const bottomRight = { x: vertices[2].x * rect.width, y: vertices[2].y * rect.height };
+                const bottomLeft = { x: vertices[3].x * rect.width, y: vertices[3].y * rect.height };
+
+                const top = {
+                    x: topLeft.x + (topRight.x - topLeft.x) * x,
+                    y: topLeft.y + (topRight.y - topLeft.y) * x
+                };
+                const bottom = {
+                    x: bottomLeft.x + (bottomRight.x - bottomLeft.x) * x,
+                    y: bottomLeft.y + (bottomRight.y - bottomLeft.y) * x
+                };
+
+                return {
+                    x: top.x + (bottom.x - top.x) * y,
+                    y: top.y + (bottom.y - top.y) * y
+                };
+            } else {
+                const topLeft = { x: vertices[0].x * rect.width, y: vertices[0].y * rect.height };
+                const topRight = { x: vertices[1].x * rect.width, y: vertices[1].y * rect.height };
+                const bottomRight = { x: vertices[2].x * rect.width, y: vertices[2].y * rect.height };
+                const bottomLeft = { x: vertices[3].x * rect.width, y: vertices[3].y * rect.height };
+
+                return {
+                    x: topLeft.x + (topRight.x - topLeft.x) * x + (bottomLeft.x - topLeft.x) * y + (bottomRight.x - topRight.x - bottomLeft.x + topLeft.x) * x * y,
+                    y: topLeft.y + (topRight.y - topLeft.y) * x + (bottomLeft.y - topLeft.y) * y + (bottomRight.y - topRight.y - bottomLeft.y + topLeft.y) * x * y
+                };
+            }
+        }
+
+        function render() {
+            renderWebGL();
+            updateFPS();
+            animationId = requestAnimationFrame(render);
+        }
+
+        function updateFPS() {
+            const now = performance.now();
+            const delta = now - lastTime;
+            fps = Math.round(1000 / delta);
+            lastTime = now;
+
+            // Only update FPS counter if not in fullscreen
+            if (!isFullscreen) {
+                const fpsElement = document.getElementById('fpsCounter');
+                if (fpsElement) {
+                    fpsElement.textContent = fps;
+                }
+            }
+        }
+
+        function updatePolygonCount() {
+            const countElement = document.getElementById('polygonCount');
+            if (countElement) {
+                countElement.textContent = polygons.length;
+            }
+        }
+
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.toggle('collapsed');
+        }
+
+        function toggleBrowserFullscreen() {
+            if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.mozFullScreenElement && !document.msFullscreenElement) {
+                const elem = document.documentElement;
+                if (elem.requestFullscreen) {
+                    elem.requestFullscreen();
+                } else if (elem.webkitRequestFullscreen) {
+                    elem.webkitRequestFullscreen();
+                } else if (elem.mozRequestFullScreen) {
+                    elem.mozRequestFullScreen();
+                } else if (elem.msRequestFullscreen) {
+                    elem.msRequestFullscreen();
+                }
+                document.querySelector('.fullscreen-btn').textContent = '⛶ Exit Fullscreen';
+                isFullscreen = true;
+
+                // Hide sidebar, deselect polygons, hide vertices
+                document.getElementById('sidebar').style.display = 'none';
+                selectedPolygonIndex = -1;
+                createVertexElements();
+
+                // Hide hamburger initially
+                const toggleBtn = document.getElementById('toggleSidebarBtn');
+                toggleBtn.classList.add('hidden');
+
+                // Start mouse timer for hamburger
+                startMouseTimer();
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                } else if (document.webkitExitFullscreen) {
+                    document.webkitExitFullscreen();
+                } else if (document.mozCancelFullScreen) {
+                    document.mozCancelFullScreen();
+                } else if (document.msExitFullscreen) {
+                    document.msExitFullscreen();
+                }
+                document.querySelector('.fullscreen-btn').textContent = '⛶ Fullscreen';
+                isFullscreen = false;
+
+                // Show sidebar
+                document.getElementById('sidebar').style.display = 'block';
+
+                // Show hamburger
+                const toggleBtn = document.getElementById('toggleSidebarBtn');
+                toggleBtn.classList.remove('hidden');
+
+                // Stop mouse timer
+                stopMouseTimer();
+
+                // Restore selected polygon if there was one
+                if (polygons.length > 0 && previousSelectedIndex >= 0) {
+                    selectedPolygonIndex = Math.min(previousSelectedIndex, polygons.length - 1);
+                    createVertexElements();
+                    updatePolygonList();
+                }
+            }
+        }
+
+        function startMouseTimer() {
+            mouseTimer = setTimeout(() => {
+                const toggleBtn = document.getElementById('toggleSidebarBtn');
+                if (toggleBtn) {
+                    toggleBtn.classList.add('hidden');
+                }
+            }, 2000);
+        }
+
+        function stopMouseTimer() {
+            if (mouseTimer) {
+                clearTimeout(mouseTimer);
+                mouseTimer = null;
+            }
+        }
+
+        function showHamburger() {
+            const toggleBtn = document.getElementById('toggleSidebarBtn');
+            if (toggleBtn && isFullscreen) {
+                toggleBtn.classList.remove('hidden');
+                stopMouseTimer();
+                startMouseTimer();
+            }
+        }
+
+        function setMappingMode(mode) {
+            mappingMode = mode;
+            document.getElementById('perspectiveBtn').classList.toggle('active', mode === 'perspective');
+            document.getElementById('stretchBtn').classList.toggle('active', mode === 'stretch');
+        }
+
+        function updateQuality() {
+            quality = document.getElementById('qualitySelect').value;
+        }
+
+        function resetCurrentPolygon() {
+            if (selectedPolygonIndex === -1) return;
+
+            polygons[selectedPolygonIndex].vertices = [
+                { x: 0.2, y: 0.2 },
+                { x: 0.8, y: 0.2 },
+                { x: 0.8, y: 0.8 },
+                { x: 0.2, y: 0.8 }
+            ];
+            updateVertexPositions();
+        }
+
+        function exportImage() {
+            const exportCanvas = document.createElement('canvas');
+            const exportCtx = exportCanvas.getContext('2d');
+
+            exportCanvas.width = 3840;
+            exportCanvas.height = 2160;
+
+            polygons.forEach(polygon => {
+                if (polygon.media && polygon.mediaType === 'image') {
+                    exportCtx.drawImage(polygon.media, 0, 0, exportCanvas.width, exportCanvas.height);
+                }
+            });
+
+            exportCanvas.toBlob(blob => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'multi-polygon-export.png';
+                a.click();
+                URL.revokeObjectURL(url);
+            });
+        }
+
+        document.getElementById('fileInput').addEventListener('change', function (e) {
+            const file = e.target.files[0];
+            if (!file || selectedPolygonIndex === -1) return;
+
+            const polygon = polygons[selectedPolygonIndex];
+            const fileInfo = document.getElementById('fileInfo');
+            fileInfo.textContent = `Loaded: ${file.name}`;
+
+            if (file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = function (event) {
+                    const img = new Image();
+                    img.onload = function () {
+                        if (polygon.texture) {
+                            gl.deleteTexture(polygon.texture);
+                        }
+
+                        polygon.media = img;
+                        polygon.mediaType = 'image';
+                        polygon.textureAspectRatio = img.width / img.height;
+                        polygon.videoReady = true;
+
+                        polygon.texture = gl.createTexture();
+                        gl.bindTexture(gl.TEXTURE_2D, polygon.texture);
+                        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+                        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+
+                        updatePolygonList();
+                    };
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            } else if (file.type.startsWith('video/')) {
+                const video = document.createElement('video');
+                video.src = URL.createObjectURL(file);
+                video.loop = true;
+                video.muted = true;
+                video.crossOrigin = 'anonymous';
+
+                video.addEventListener('loadedmetadata', function () {
+                    if (polygon.texture) {
+                        gl.deleteTexture(polygon.texture);
+                    }
+
+                    polygon.media = video;
+                    polygon.mediaType = 'video';
+                    polygon.textureAspectRatio = video.videoWidth / video.videoHeight;
+                    polygon.videoReady = false;
+
+                    polygon.texture = gl.createTexture();
+                    gl.bindTexture(gl.TEXTURE_2D, polygon.texture);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+                    updatePolygonList();
+                });
+
+                video.addEventListener('canplaythrough', function () {
+                    polygon.videoReady = true;
+                    video.play().catch(e => {
+                        console.log('Video autoplay prevented:', e);
+                    });
+                });
+
+                video.addEventListener('error', function (e) {
+                    console.error('Video error:', e);
+                    fileInfo.textContent = `Error loading video: ${file.name}`;
+                });
+            }
+        });
+
+        document.addEventListener('mousemove', function (e) {
+            if (isDragging && dragVertex !== -1 && selectedPolygonIndex !== -1) {
+                const container = document.getElementById('canvasContainer');
+                const rect = container.getBoundingClientRect();
+
+                const x = (e.clientX - rect.left) / rect.width;
+                const y = (e.clientY - rect.top) / rect.height;
+
+                polygons[selectedPolygonIndex].vertices[dragVertex] = {
+                    x: Math.max(0, Math.min(1, x)),
+                    y: Math.max(0, Math.min(1, y))
+                };
+
+                updateVertexPositions();
+            }
+
+            // Show hamburger on mouse move in fullscreen
+            if (isFullscreen) {
+                showHamburger();
+            }
+        });
+
+        document.addEventListener('mouseup', function () {
+            if (isDragging && dragVertex !== -1) {
+                const vertexEl = document.getElementById(`vertex${dragVertex}`);
+                if (vertexEl) {
+                    vertexEl.classList.remove('dragging');
+                }
+            }
+            isDragging = false;
+            dragVertex = -1;
+        });
+
+        document.getElementById('canvasContainer').addEventListener('click', function (e) {
+            if (e.target.id === 'webglCanvas' || e.target.id === 'canvasContainer') {
+                // Don't hide vertices when clicking on canvas
+                // Only hide when pressing Escape or entering fullscreen
+            }
+        });
+
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') {
+                if (document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement) {
+                    toggleBrowserFullscreen();
+                } else {
+                    // Toggle vertex visibility with Escape
+                    toggleVerticesVisibility(!verticesVisible);
+                }
+            }
+        });
+
+        window.addEventListener('resize', resizeCanvas);
+        initWebGL();
+        resizeCanvas();
+
+        addPolygon();
+    </script>
+</body>
+
+</html>

@@ -101,6 +101,10 @@ export class CerebrasProvider implements DesktopModelProvider {
   }
 
   async chat(systemPrompt: string, userPrompt: string): Promise<string> {
+    const totalPromptChars = systemPrompt.length + userPrompt.length;
+    const estimatedTokens = Math.ceil(totalPromptChars / 4); // rough estimate: ~4 chars per token
+    console.log(`[CerebrasProvider] Sending prompt: ${totalPromptChars} chars (~${estimatedTokens} tokens)`);
+
     const completion = await this.client.chat.completions.create({
       model: this.model,
       messages: [
@@ -109,6 +113,12 @@ export class CerebrasProvider implements DesktopModelProvider {
       ],
     });
     const response = completion as { choices: Array<{ message: { content: string } }> };
-    return response.choices[0]?.message?.content || '';
+    const responseText = response.choices[0]?.message?.content || '';
+
+    const responseChars = responseText.length;
+    const responseTokens = Math.ceil(responseChars / 4);
+    console.log(`[CerebrasProvider] Received response: ${responseChars} chars (~${responseTokens} tokens)`);
+
+    return responseText;
   }
 }

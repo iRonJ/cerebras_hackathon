@@ -39,7 +39,7 @@ export class AIPlanner {
         const toolsList = tools.map(t => `- ${t.name}: ${t.description} (Endpoint: ${t.apiEndpoint})`).join('\n');
 
         const prompt = `
-You are an intelligent API dispatcher for the Cerebral DE system.
+You are an intelligent API dispatcher for the Cerebral Browser Based Desktop Environment system.
 
 ROUTING RULES:
 1. If the request path matches a known tool endpoint exactly, use "execute_tool"
@@ -94,38 +94,123 @@ Respond with JSON:
         }
     }
 
-    async generateTool(toolDescription: string): Promise<ToolDefinition> {
+    /**
+     * Generate a new tool or update an existing one
+     * @param toolDescription - Description of what to create/modify
+     * @param existingTool - Optional existing tool to update (if not provided, creates new)
+     */
+    async generateTool(toolDescription: string, existingTool?: ToolDefinition): Promise<ToolDefinition> {
+        // If updating, read the current code from disk
+        let currentCode = '';
+        if (existingTool) {
+            try {
+                const fs = await import('fs');
+                const path = await import('path');
+                const ext = existingTool.language === 'shell' ? '.sh' : '.py';
+                const fullPath = path.join(process.cwd(), 'server', 'tools', `${existingTool.name}${ext}`);
+                if (fs.existsSync(fullPath)) {
+                    currentCode = fs.readFileSync(fullPath, 'utf-8');
+                }
+            } catch (e) {
+                console.warn(`[AIPlanner] Could not read existing tool code: ${e}`);
+            }
+        }
+
+        // Build the context section for updates
+        const updateContext = existingTool ? `
+EXISTING TOOL (you are UPDATING this tool):
+- Name: ${existingTool.name}
+- Description: ${existingTool.description}
+- Command: ${existingTool.command}
+
+CURRENT CODE:
+\`\`\`${existingTool.language || 'python'}
+${currentCode}
+\`\`\`
+
+IMPORTANT: Keep the same tool name. Update code and description as needed based on instructions.
+` : '';
+
         const prompt = `
-Generate a tool (script) based on this description:
+${existingTool ? 'UPDATE an existing tool based on this request:' : 'Generate a new tool (script) based on this description:'}
 ${toolDescription}
 
+${updateContext}
 The tool must be a standalone script (Python or Shell).
+PLATFORM: macOS (use macOS-compatible commands, e.g. BSD find, brew for packages if needed, mlx).
 It should accept arguments via command line flags (e.g. --arg value).
 It should print the result to stdout.
+CRITICAL: Do NOT use ANSI color codes, TUI elements, or interactive progress bars (like tqdm). Output must be clean text or JSON. Ensure UTF-8 encoding is used for output.
+CRITICAL: Keep the code CONCISE (under 150 lines). Use simple implementations. Avoid excessive comments.
+
+CRITICAL: In the "command" field, use placeholder syntax like {arg_name} for all arguments.
+- Example: "python3 tools/jpeg_finder.py --directory {directory}"
+- Do NOT use literal example values like "/path/to/search" - use {placeholder} instead!
+- Placeholder names must match the flag names (e.g. --directory {directory}, --input {input})
 
 Respond with JSON:
 {
-  "name": "tool_name",
+  "name": "${existingTool?.name || 'tool_name'}",
   "description": "what it does",
-  "apiEndpoint": "/api/mono/tool_name",
-  "command": "python3 tools/script.py --arg {value}",
+  "apiEndpoint": "/api/mono/${existingTool?.name || 'tool_name'}",
+  "command": "python3 tools/script.py --arg {arg}",
   "responseType": "string" | "list" | "json",
   "responseSample": "minimal example of the output (especially for json)",
+  "usage": "fetch('/api/mono/tool_name?arg=value').then(r => r.json()).then(data => console.log(data))",
   "language": "python" | "shell",
+  "pip_packages": ["list", "of", "python", "packages", "needed"],
   "code": "full code here"
 }
 `;
-        const responseText = await this.provider.chat(prompt, "Generate tool");
-        const match = responseText.match(/[\[{].*[\]}]/s);
+        const logPrefix = existingTool ? 'Update tool' : 'Generate tool';
+        let responseText = await this.provider.chat(prompt, logPrefix);
+        let match = responseText.match(/[\[{].*[\]}]/s);
+
         if (!match) {
-            console.error("[AIPlanner] generateTool failed - no JSON found in response:", responseText.slice(0, 500));
-            throw new Error("Failed to generate tool JSON - LLM response did not contain valid JSON");
+            console.error(`[AIPlanner] ${logPrefix} failed - no JSON found in response:`, responseText.slice(0, 500));
+            throw new Error(`Failed to ${logPrefix.toLowerCase()} JSON - LLM response did not contain valid JSON`);
         }
+
         try {
-            return JSON.parse(match[0]);  // Use match[0], not match[1] - no capture group
+            const result = JSON.parse(match[0]);
+            // For updates, preserve the original name
+            if (existingTool) {
+                result.name = existingTool.name;
+                result.apiEndpoint = existingTool.apiEndpoint;
+            }
+            return result;
         } catch (e) {
-            console.error("[AIPlanner] generateTool JSON parse error:", e, "Response:", match[0].slice(0, 500));
-            throw new Error(`Failed to parse tool JSON: ${(e as Error).message}`);
+            // JSON was likely truncated, retry with a more concise request
+            console.warn(`[AIPlanner] ${logPrefix} JSON parse failed, retrying with concise request...`);
+
+            const retryPrompt = `
+Your previous response was truncated. Generate a MINIMAL tool for:
+${toolDescription}
+${existingTool ? `\nThis is an UPDATE to: ${existingTool.name}` : ''}
+
+KEEP IT VERY SHORT - under 100 lines of code. Simple implementation only.
+Respond with valid JSON only, no markdown:
+{"name": "${existingTool?.name || '...'}", "description": "...", "apiEndpoint": "/api/mono/${existingTool?.name || '...'}", "command": "python3 tools/....py --arg {arg}", "responseType": "json", "responseSample": "...", "usage": "...", "language": "python", "pip_packages": [...], "code": "..."}
+`;
+
+            responseText = await this.provider.chat(retryPrompt, `${logPrefix} (retry)`);
+            match = responseText.match(/[\[{].*[\]}]/s);
+
+            if (!match) {
+                throw new Error(`Failed to ${logPrefix.toLowerCase()} JSON on retry`);
+            }
+
+            try {
+                const result = JSON.parse(match[0]);
+                if (existingTool) {
+                    result.name = existingTool.name;
+                    result.apiEndpoint = existingTool.apiEndpoint;
+                }
+                return result;
+            } catch (retryError) {
+                console.error(`[AIPlanner] ${logPrefix} retry also failed:`, retryError);
+                throw new Error(`Failed to parse tool JSON after retry: ${(retryError as Error).message}`);
+            }
         }
     }
 
@@ -188,6 +273,7 @@ Respond with JSON:
   "fixType": "code" | "command" | "both" | "unfixable",
   "updatedCode": "complete fixed Python code (if fixType is code or both)",
   "updatedCommand": "fixed command template (if fixType is command or both)",
+  "pip_packages": ["list", "of", "missing", "dependencies", "to", "install"],
   "testSuggestion": "how to verify the fix works"
 }
 `;
@@ -200,7 +286,7 @@ Respond with JSON:
                 return { fixed: false };
             }
 
-            const repair = JSON.parse(match[1]);
+            const repair = JSON.parse(match[0]);
             console.log(`[AIPlanner] Repair diagnosis: ${repair.diagnosis}`);
             console.log(`[AIPlanner] Fix type: ${repair.fixType}`);
 
@@ -218,8 +304,16 @@ Respond with JSON:
                 console.log(`[AIPlanner] Updated tool code: ${fullPath}`);
             }
 
-            // Update the command template if needed
+            // Prepare updated tool definition
             const updatedTool: ToolDefinition = { ...tool };
+
+            // Install new dependencies if needed
+            if (repair.pip_packages && repair.pip_packages.length > 0) {
+                await this.toolManager.installPackages(repair.pip_packages);
+                updatedTool.pip_packages = repair.pip_packages;
+            }
+
+            // Update the command template if needed
             if (repair.updatedCommand && (repair.fixType === 'command' || repair.fixType === 'both')) {
                 updatedTool.command = repair.updatedCommand;
                 // Re-register the tool with updated command
@@ -235,6 +329,24 @@ Respond with JSON:
         } catch (e) {
             console.error(`[AIPlanner] Repair agent error:`, e);
             return { fixed: false };
+        }
+    }
+
+    async updateTool(
+        tool: ToolDefinition,
+        instructions: string
+    ): Promise<boolean> {
+        console.log(`[AIPlanner] Updating tool: ${tool.name} with instructions: ${instructions}`);
+
+        try {
+            // Use the unified generateTool method with existingTool parameter
+            const updatedTool = await this.generateTool(instructions, tool);
+            await this.toolManager.registerTool(updatedTool);
+            console.log(`[AIPlanner] Tool ${tool.name} updated successfully.`);
+            return true;
+        } catch (e) {
+            console.error(`[AIPlanner] Failed to update tool:`, e);
+            return false;
         }
     }
 
@@ -284,7 +396,7 @@ Response Type: ${tool.responseType}
 Response Sample: ${tool.responseSample || 'N/A'}
 Code:
 \`\`\`python
-${code.slice(0, 2000) || 'Code not available'}
+${code || 'Code not available'}
 \`\`\`
 `).join('\n---\n');
 
@@ -298,7 +410,7 @@ ${errorContext ? `ADDITIONAL ERROR CONTEXT:\n${errorContext}\n` : ''}
 
 GENERATED APP CODE (HTML/JS):
 \`\`\`html
-${appHtml.slice(0, 4000)}
+${appHtml}
 \`\`\`
 
 TOOLS USED BY THIS APP:
@@ -387,19 +499,25 @@ Respond with JSON:
         const toolsList = allTools.map(t => `- ${t.name}: ${t.description}`).join('\n');
 
         const prompt = `
+You are an intelligent tool identifier for the Cerebral Browser Based Desktop Environment system. We will generate a full web app later but for now we need to identify tools that cannot be implemented in the web app.
+
 User Request: "${userPrompt}"
 
 Available Tools:
 ${toolsList}
 
 Analyze the request and decide:
-1. Which existing tools are relevant?
-2. Is a NEW tool needed to access shell commands or system resources? If so, describe it. New tools are only needed if it's a system resource that cannot be accessed from a browser based html/js application. DO NOT generate tools that only output HTML or JS/TS/JAX etc.
+0. Does this request need a tool at all? If not, don't create or modify any tools.
+1. Which existing tools if any are relevant? Carefully consider if any of the existing tools can be used to accomplish the user's request.
+2. Don't build a tool for anything that can be done in a web based JS frontend. Is a NEW tool needed to access shell commands or system resources? If so, describe it. New tools are only needed if it's a system resource that cannot be accessed from a browser based html/js application. DO NOT generate tools that only output HTML or JS/TS/JAX etc.
+3. Does the user want to UPDATE/MODIFY an existing tool? If so, specify which tool and what changes.
 
 Respond with JSON:
 {
   "relevantToolNames": ["tool1", "tool2"],
-  "newToolDescription": "description of new tool if needed, or null"
+  "newToolDescription": "description of new tool if needed || null",
+  "toolToUpdate": "tool_name_to_modify || null",
+  "updateInstructions": "what changes to make to the tool || null"
 }
 `;
 
@@ -415,6 +533,25 @@ Respond with JSON:
 
             const relevantTools = allTools.filter(t => plan.relevantToolNames?.includes(t.name));
 
+            // Handle tool update request
+            if (plan.toolToUpdate && plan.updateInstructions) {
+                const toolToUpdate = this.toolManager.getTool(plan.toolToUpdate);
+                if (toolToUpdate) {
+                    console.log(`[AIPlanner] Updating tool ${plan.toolToUpdate}: ${plan.updateInstructions}`);
+                    const success = await this.updateTool(toolToUpdate, plan.updateInstructions);
+                    if (success) {
+                        // Return the updated tool
+                        const updatedTool = this.toolManager.getTool(plan.toolToUpdate);
+                        if (updatedTool && !relevantTools.some(t => t.name === updatedTool.name)) {
+                            relevantTools.push(updatedTool);
+                        }
+                    }
+                } else {
+                    console.warn(`[AIPlanner] Tool to update not found: ${plan.toolToUpdate}`);
+                }
+            }
+
+            // Handle new tool creation
             if (plan.newToolDescription) {
                 console.log(`[AIPlanner] Generating new tool: ${plan.newToolDescription}`);
                 try {
@@ -507,6 +644,148 @@ Respond with JSON:
     }
 
     /**
+     * Loop 1: Tool Preparation
+     * Analyze request and current tools, determining if we have everything needed.
+     * Logic: Identify -> Check Existence -> (Create | Update) -> Iterate
+     */
+    async prepareTools(
+        userRequest: string,
+        currentTools: ToolDefinition[]
+    ): Promise<{
+        missingTools: boolean;
+        toolsToCreate?: string[]; // Descriptions of tools to create
+        toolsToUpdate?: string[]; // Names of tools to update
+        updateInstructions?: Record<string, string>; // Instructions for updating specific tools
+        finalToolList?: string[]; // Names of all tools ready to be used
+    }> {
+        const toolsList = currentTools.map(t => `- ${t.name}: ${t.description}`).join('\n');
+
+        const prompt = `
+You are a TOOL ARCHITECT for the Cerebral DE system.
+USER REQUEST: "${userRequest}"
+
+AVAILABLE TOOLS:
+${toolsList}
+
+Analyze if the available tools are sufficient to fulfill the user request.
+- Identify only RUNTIME tools that the app needs to CALL (e.g. APIs, data sources, calculation engines).
+- Do NOT create tools for generating the app code itself (that is handled separately).
+- If a tool is missing, describe it.
+- If a tool exists but needs modification (e.g. adding a flag), describe the update.
+- If all tools are present and ready, confirm completion.
+
+Respond with JSON:
+{
+  "missingTools": boolean,
+  "toolsToCreate": ["description of tool 1", "description of tool 2"],
+  "toolsToUpdate": ["tool_name_1"], 
+  "updateInstructions": { "tool_name_1": "instruction on what to change" },
+  "finalToolList": ["list", "of", "all", "tool", "names", "needed"]
+}
+`;
+        const responseText = await this.provider.chat(prompt, "Prepare Tools");
+        const match = responseText.match(/[\[{].*[\]}]/s);
+        if (!match) return { missingTools: false, finalToolList: currentTools.map(t => t.name) };
+
+        try {
+            return JSON.parse(match[0]);
+        } catch {
+            return { missingTools: false, finalToolList: currentTools.map(t => t.name) };
+        }
+    }
+
+    /**
+     * Loop 2 Stage 2: App Code Review
+     * unexpected validation of tool usage against definitions
+     */
+    async reviewAppCode(
+        appCode: string,
+        toolsUsed: ToolDefinition[]
+    ): Promise<{
+        passed: boolean;
+        issues: string[];
+        correctedCode?: string;
+    }> {
+        const toolsContext = toolsUsed.map(t => `
+TOOL: ${t.name}
+ENDPOINT: ${t.apiEndpoint}
+SAMPLE OUTPUT: ${t.responseSample}
+        `).join('\n');
+
+        const prompt = `
+You are a CODE REVIEWER. Review this generated App Code to ensure it correctly uses the available tools.
+
+APP CODE:
+\`\`\`html
+${appCode}
+\`\`\`
+
+TOOL DEFINITIONS:
+${toolsContext}
+
+CHECKLIST:
+1. Are API endpoints correct? (Must match ${toolsUsed.map(t => t.apiEndpoint).join(', ')})
+2. Is the response parsed correctly? (Check if they access .result, .items etc based on Sample Output)
+3. Is there basic error handling?
+
+Respond with JSON:
+{
+  "passed": boolean,
+  "issues": ["list of specific issues found"],
+  "correctedCode": "FULL corrected HTML code if issues found (otherwise null)"
+}
+`;
+        const responseText = await this.provider.chat(prompt, "Review App Code");
+        const match = responseText.match(/[\[{].*[\]}]/s);
+        if (!match) return { passed: true, issues: [] };
+
+        try {
+            return JSON.parse(match[0]);
+        } catch {
+            return { passed: true, issues: [] }; // Fail open if parsing fails
+        }
+    }
+
+    /**
+     * Loop 2 Stage 3: Requirements Verification
+     */
+    async verifyRequirements(
+        appCode: string,
+        userRequest: string
+    ): Promise<{
+        verified: boolean;
+        missingRequirements: string[];
+        suggestion?: string;
+    }> {
+        const prompt = `
+You are a QA SPECIALIST. Verify if this App Code meets the User Request.
+
+USER REQUEST: "${userRequest}"
+
+APP CODE:
+\`\`\`html
+${appCode}
+\`\`\`
+
+Respond with JSON:
+{
+  "verified": boolean,
+  "missingRequirements": ["list of missing features"],
+  "suggestion": "how to fix (if not verified)"
+}
+`;
+        const responseText = await this.provider.chat(prompt, "Verify Requirements");
+        const match = responseText.match(/[\[{].*[\]}]/s);
+        if (!match) return { verified: true, missingRequirements: [] };
+
+        try {
+            return JSON.parse(match[0]);
+        } catch {
+            return { verified: true, missingRequirements: [] };
+        }
+    }
+
+    /**
      * Generate an app/widget based on requirements
      */
     async generateApp(
@@ -521,6 +800,7 @@ Respond with JSON:
         const toolsInfo = context.tools.map(t =>
             `- ${t.name}: ${t.description}
   Endpoint: ${t.endpoint}
+  Command: ${(t as any).command || 'N/A'}
   Sample Response: ${t.responseSample || 'N/A'}`
         ).join('\n');
 
@@ -528,7 +808,7 @@ Respond with JSON:
             ? `
 EXISTING APP CONTENT (you are UPDATING this app):
 \`\`\`html
-${context.existingContent.slice(0, 3000)}
+${context.existingContent}
 \`\`\`
 
 IMPORTANT: Preserve existing functionality unless explicitly asked to change it.
@@ -550,11 +830,12 @@ ${toolsInfo}
 ${updateContext}
 
 CRITICAL INSTRUCTIONS FOR TOOL USAGE:
-1. Study the "Sample Response" for each tool - this shows the EXACT JSON structure you'll receive
+1. Study the "Sample Response" for each tool CAREFULLY. The Javascript code MUST match this structure exactly.
 2. For GET requests with parameters, use query strings: fetch('${context.apiRoot}/get_files?path=/some/path')
 3. For POST requests with data: fetch('${context.apiRoot}/tool_name', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({...}) })
-4. ALWAYS parse the response as JSON: const data = await response.json(); then access data.result or the nested structure
+4. PARSING RULE: API responses strictly follow the Sample Response structure. Do NOT assume any 'result' wrapper unless shown in the sample. Example: if sample is '{"items": []}', use 'data.items' directly.
 5. Handle errors gracefully with try/catch and show user-friendly messages
+6. PARAMETER NAMES: Use the EXACT placeholder names from the tool's command (shown in curly braces). If command is "--directory {directory}", use "?directory=..." NOT "?path=...". Match names exactly!
 
 DESIGN REQUIREMENTS:
 1. Create a fully responsive HTML widget with modern, premium styling

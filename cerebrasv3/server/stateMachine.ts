@@ -21,9 +21,18 @@ export enum State {
     INTENT_UPDATE_APP = 'INTENT_UPDATE_APP',
     DIAGNOSE_ERROR = 'DIAGNOSE_ERROR',
     TOOL_AGENT = 'TOOL_AGENT',
+
+    // Validated 2-Loop Architecture States
+    TOOL_PREPARATION = 'TOOL_PREPARATION', // Loop 1: Tool Prep
+    APP_GENERATION = 'APP_GENERATION',     // Loop 2a: Generate
+    APP_REVIEW = 'APP_REVIEW',             // Loop 2b: Review
+    APP_VERIFICATION = 'APP_VERIFICATION', // Loop 2c: Verify
+    APP_RETURNED = 'APP_RETURNED',
+
+    // Legacy states to eventually remove/migrate
     APP_BUILDER = 'APP_BUILDER',
     TOOLS_DEFINED = 'TOOLS_DEFINED',
-    APP_RETURNED = 'APP_RETURNED',
+
     LIVE_UPDATING_LOOP = 'LIVE_UPDATING_LOOP',
     FRONTEND_POLLING = 'FRONTEND_POLLING',
     SERVER_APP_SYNC = 'SERVER_APP_SYNC',
@@ -66,6 +75,15 @@ export interface StateMachineContext {
     // App generation
     generatedApp?: CachedAppFull;
     isLiveUpdating: boolean;
+
+    // Review/Verify Context
+    reviewFeedback?: string[];
+    verificationIssues?: string[];
+    appGenerationAttempts: number;
+
+    // Diagnosis Context
+    diagnosisContext?: string;
+    appCodeFix?: string;
 
     // Response
     response?: any;
@@ -113,6 +131,13 @@ export class RequestStateMachine {
         this.handlers.set(State.INTENT_UPDATE_APP, this.handleIntentUpdateApp.bind(this));
         this.handlers.set(State.DIAGNOSE_ERROR, this.handleDiagnoseError.bind(this));
         this.handlers.set(State.TOOL_AGENT, this.handleToolAgent.bind(this));
+
+        // 2-Loop Architecture Handlers
+        this.handlers.set(State.TOOL_PREPARATION, this.handleToolPreparation.bind(this));
+        this.handlers.set(State.APP_GENERATION, this.handleAppGeneration.bind(this));
+        this.handlers.set(State.APP_REVIEW, this.handleAppReview.bind(this));
+        this.handlers.set(State.APP_VERIFICATION, this.handleAppVerification.bind(this));
+
         this.handlers.set(State.APP_BUILDER, this.handleAppBuilder.bind(this));
         this.handlers.set(State.APP_RETURNED, this.handleAppReturned.bind(this));
         this.handlers.set(State.LIVE_UPDATING_LOOP, this.handleLiveUpdatingLoop.bind(this));
@@ -131,6 +156,7 @@ export class RequestStateMachine {
             requiredTools: [],
             newToolsGenerated: [],
             isLiveUpdating: false,
+            appGenerationAttempts: 0,
             apiRoot: this.apiRoot,
         };
 
@@ -223,6 +249,65 @@ export class RequestStateMachine {
         return State.AI_PREPROCESS;
     }
 
+    private async executeToolWithRetry(
+        tool: ToolDefinition,
+        args: Record<string, string>,
+        maxRetries: number = 3
+    ): Promise<string> {
+        let currentTool = tool;
+        let attempt = 0;
+        let lastError: Error | null = null;
+        let lastCommand = '';
+
+        while (attempt <= maxRetries) {
+            attempt++;
+            try {
+                // Execute
+                const result = await this.toolManager.executeTool(currentTool.name, args);
+                return result;
+            } catch (error) {
+                lastError = error as Error;
+                lastCommand = this.toolManager.getLastCommand() || 'unknown';
+                console.warn(`[StateMachine] Tool execution failed (Attempt ${attempt}/${maxRetries + 1}):`, lastError.message);
+
+                if (attempt > maxRetries) {
+                    break;
+                }
+
+                // Trigger repair
+                console.log(`[StateMachine] Triggering repair agent...`);
+                const repairResult = await this.aiPlanner.repairTool(
+                    currentTool,
+                    lastError.message,
+                    lastCommand,
+                    args
+                );
+
+                if (repairResult.fixed && repairResult.updatedTool) {
+                    console.log(`[StateMachine] Tool repair succeeded, retrying with updated tool...`);
+                    currentTool = repairResult.updatedTool;
+                    // Loop continues with new tool
+                } else {
+                    console.warn(`[StateMachine] Tool repair failed or verified unfixable. Stopping retries.`);
+                    break;
+                }
+            }
+        }
+
+        // If we got here, all retries failed
+        // Construct a clean JSON error response if possible
+        const errorResponse = {
+            status: "error",
+            error: lastError?.message || "Tool execution failed multiple times",
+            command: lastCommand,
+            attempts: attempt
+        };
+
+        // Throw or return? The caller expects a string result (JSON string or raw).
+        // Let's return the error JSON string so the caller can parse it.
+        return JSON.stringify(errorResponse);
+    }
+
     private async handleRegexMatched(ctx: StateMachineContext): Promise<State> {
         // Fast path: execute tool directly
         if (!ctx.matchedTool) {
@@ -231,17 +316,18 @@ export class RequestStateMachine {
         }
 
         try {
-            const result = await this.toolManager.executeTool(
-                ctx.matchedTool.name,
+            const result = await this.executeToolWithRetry(
+                ctx.matchedTool,
                 ctx.matchedArgs || {}
             );
 
             // Parse JSON results if the tool returns JSON
             if (ctx.matchedTool.responseType === 'json') {
                 try {
-                    ctx.response = { result: JSON.parse(result) };
+                    ctx.response = JSON.parse(result);
                 } catch {
-                    // If parsing fails, return raw string
+                    // check if result is already our error JSON?
+                    // if parse failed, wrap string
                     ctx.response = { result };
                 }
             } else {
@@ -249,46 +335,9 @@ export class RequestStateMachine {
             }
             return State.END;
         } catch (error) {
-            const errorMessage = (error as Error).message;
-            console.log(`[StateMachine] Tool execution failed: ${errorMessage}`);
-
-            // Trigger the repair agent
-            const executedCommand = this.toolManager.getLastCommand() || 'unknown';
-            const repairResult = await this.aiPlanner.repairTool(
-                ctx.matchedTool,
-                errorMessage,
-                executedCommand,
-                ctx.matchedArgs || {}
-            );
-
-            if (repairResult.fixed) {
-                console.log(`[StateMachine] Tool repair succeeded, retrying execution...`);
-                // Retry with potentially updated tool
-                try {
-                    const updatedTool = repairResult.updatedTool || ctx.matchedTool;
-                    const retryResult = await this.toolManager.executeTool(
-                        updatedTool.name,
-                        ctx.matchedArgs || {}
-                    );
-
-                    // Parse JSON results if the tool returns JSON
-                    if (updatedTool.responseType === 'json') {
-                        try {
-                            ctx.response = { result: JSON.parse(retryResult) };
-                        } catch {
-                            ctx.response = { result: retryResult };
-                        }
-                    } else {
-                        ctx.response = { result: retryResult };
-                    }
-                    return State.END;
-                } catch (retryError) {
-                    console.error(`[StateMachine] Tool still failed after repair:`, retryError);
-                    ctx.error = retryError as Error;
-                    return State.ERROR;
-                }
-            }
-
+            // Should not happen as executeToolWithRetry catches internally and returns error JSON
+            // But just in case
+            console.error('[StateMachine] unhandled error in regex match:', error);
             ctx.error = error as Error;
             return State.ERROR;
         }
@@ -372,9 +421,9 @@ export class RequestStateMachine {
                 case 'diagnose_error':
                     return State.DIAGNOSE_ERROR;
                 case 'tool_only':
-                    return State.TOOL_AGENT;
+                    return State.TOOL_PREPARATION;
                 default:
-                    return State.TOOL_AGENT;
+                    return State.TOOL_PREPARATION;
             }
         } catch (error) {
             ctx.error = error as Error;
@@ -383,9 +432,9 @@ export class RequestStateMachine {
     }
 
     private async handleIntentNewApp(ctx: StateMachineContext): Promise<State> {
-        // New app flow - tools are identified, move to tool resolution
+        // New app flow - tools are identified, move to tool preparation loop
         console.log(`[StateMachine] Creating new app with ${ctx.requiredTools.length} tools`);
-        return State.TOOL_AGENT;
+        return State.TOOL_PREPARATION;
     }
 
     private async handleIntentUpdateApp(ctx: StateMachineContext): Promise<State> {
@@ -401,7 +450,7 @@ export class RequestStateMachine {
             }
         }
 
-        return State.TOOL_AGENT;
+        return State.TOOL_PREPARATION;
     }
 
     private async handleDiagnoseError(ctx: StateMachineContext): Promise<State> {
@@ -432,6 +481,12 @@ export class RequestStateMachine {
                 appCodeFix: diagnosis.appCodeFix,
             };
 
+            // Capture diagnosis context for potential re-generation
+            if (diagnosis.diagnosis) {
+                ctx.diagnosisContext = diagnosis.diagnosis;
+                ctx.appCodeFix = diagnosis.appCodeFix;
+            }
+
             // If tools were fixed, tell the frontend
             if (diagnosis.toolFixes.length > 0) {
                 ctx.response.toolsRepaired = diagnosis.toolFixes.filter(f => f.fixApplied).map(f => f.toolName);
@@ -439,11 +494,7 @@ export class RequestStateMachine {
 
             // After diagnosis, proceed to app builder to regenerate with fixes
             if (diagnosis.issueType !== 'unknown') {
-                // Pass diagnosis context to app builder
-                ctx.request.body = ctx.request.body || {};
-                ctx.request.body.diagnosisContext = diagnosis.diagnosis;
-                ctx.request.body.appCodeFix = diagnosis.appCodeFix;
-                return State.APP_BUILDER;
+                return State.APP_GENERATION;
             }
 
             return State.END;
@@ -454,16 +505,277 @@ export class RequestStateMachine {
         }
     }
 
+    /**
+     * Loop 1: Tool Preparation
+     * Iteratively ensures all necessary tools exist and are up to date
+     */
+    private async handleToolPreparation(ctx: StateMachineContext): Promise<State> {
+        console.log('[StateMachine] Entering Tool Preparation Loop');
+        const userRequest = ctx.request.body?.prompt || ctx.request.query?.prompt || '';
+
+        try {
+            // Check what tools we have vs what we need
+            const prepResult = await this.aiPlanner.prepareTools(
+                userRequest,
+                this.toolManager.getAllTools()
+            );
+
+            if (!prepResult.missingTools) {
+                console.log('[StateMachine] Tool Preparation Complete - All tools ready.');
+
+                // Update required tools list
+                if (prepResult.finalToolList) {
+                    ctx.requiredTools = prepResult.finalToolList
+                        .map(name => this.toolManager.getTool(name))
+                        .filter((t): t is ToolDefinition => !!t);
+                }
+
+                // Transition to next phase based on intent
+                if (ctx.intent === 'tool_only') {
+                    return State.TOOL_AGENT;
+                } else {
+                    return State.APP_GENERATION;
+                }
+            }
+
+            // Handle Creations
+            if (prepResult.toolsToCreate && prepResult.toolsToCreate.length > 0) {
+                for (const desc of prepResult.toolsToCreate) {
+                    console.log(`[StateMachine] Creating new tool: ${desc.substring(0, 50)}...`);
+                    const newTool = await this.aiPlanner.generateTool(desc);
+                    await this.toolManager.registerTool(newTool);
+
+                    // Add regex for new tool
+                    this.regexLadder.addPattern({
+                        pattern: `^${newTool.apiEndpoint.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\?.*)?$`,
+                        method: 'POST', // Default to POST for tools
+                        toolName: newTool.name,
+                        argMapping: {}
+                    });
+                }
+            }
+
+            // Handle Updates
+            if (prepResult.toolsToUpdate && prepResult.toolsToUpdate.length > 0) {
+                console.log(`[StateMachine] Tools needing update: ${prepResult.toolsToUpdate.join(', ')}`);
+
+                for (const toolName of prepResult.toolsToUpdate) {
+                    const existingTool = this.toolManager.getTool(toolName);
+                    if (existingTool) {
+                        const instructions = prepResult.updateInstructions?.[toolName] || "Update to match requirements";
+                        console.log(`[StateMachine] Updating tool ${toolName} with instructions: ${instructions.substring(0, 50)}...`);
+
+                        const success = await this.aiPlanner.updateTool(existingTool, instructions);
+                        if (success) {
+                            // Re-fetch updated tool definition
+                            const updatedTool = this.toolManager.getTool(toolName);
+                            if (updatedTool) {
+                                // Add regex pattern for the updated tool (idempotent if endpoint same, safe if different)
+                                this.regexLadder.addPattern({
+                                    pattern: `^${updatedTool.apiEndpoint.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\?.*)?$`,
+                                    method: 'POST',
+                                    toolName: updatedTool.name,
+                                    argMapping: {}
+                                });
+                            }
+                        }
+                    } else {
+                        console.warn(`[StateMachine] Requested update for missing tool: ${toolName}`);
+                    }
+                }
+            }
+
+            // If we created/updated tools, we loop back to check if we're done
+            return State.TOOL_PREPARATION;
+
+        } catch (error) {
+            console.error('[StateMachine] Tool Preparation Error:', error);
+            ctx.error = error as Error;
+            return State.ERROR;
+        }
+    }
+
+    /**
+     * Loop 2a: App Generation
+     * Generates the app code using the validated tools
+     */
+    private async handleAppGeneration(ctx: StateMachineContext): Promise<State> {
+        console.log(`[StateMachine] Entering App Generation (Attempt ${ctx.appGenerationAttempts + 1})`);
+        ctx.appGenerationAttempts++;
+
+        const userPrompt = ctx.request.body?.prompt || ctx.request.query?.prompt || 'Generate an app based on the available tools and context.';
+
+        // Add review/verification feedback to prompt if retrying
+        let expandedPrompt = userPrompt;
+        if (ctx.reviewFeedback && ctx.reviewFeedback.length > 0) {
+            expandedPrompt += `\n\nPREVIOUS CODE REVIEW FAILURES (FIX THESE): \n${ctx.reviewFeedback.join('\n')}`;
+        }
+        if (ctx.verificationIssues && ctx.verificationIssues.length > 0) {
+            expandedPrompt += `\n\nPREVIOUS QA VERIFICATION ISSUES (FIX THESE): \n${ctx.verificationIssues.join('\n')}`;
+        }
+        if (ctx.diagnosisContext) {
+            expandedPrompt += `\n\nDIAGNOSIS CONTEXT: ${ctx.diagnosisContext}. ${ctx.appCodeFix || ''}`;
+        }
+
+        try {
+            const context = {
+                appId: ctx.targetAppId || `app-${ctx.sessionId}-${Date.now()}`,
+                apiRoot: ctx.apiRoot,
+                tools: (ctx.matchedTool ? [ctx.matchedTool] : ctx.requiredTools).map(t => ({
+                    name: t.name,
+                    description: t.description,
+                    endpoint: t.apiEndpoint,
+                    responseSample: t.responseSample
+                })),
+                existingContent: ctx.cachedAppMeta ? ctx.cachedApp?.html : undefined
+            };
+
+            const result = await this.aiPlanner.generateApp(expandedPrompt, context);
+
+            // Store result temporarily in ctx.generatedApp (using cache structure)
+            ctx.generatedApp = {
+                id: context.appId,
+                sessionId: ctx.sessionId,
+                prompt: userPrompt, // Store original prompt
+                isLiveUpdating: result.isLiveUpdating || false,
+                lastUpdated: Date.now(),
+                toolsUsed: ctx.requiredTools.map(t => t.name),
+                html: result.html,
+                js: result.js,
+                css: result.css
+            };
+
+            return State.APP_REVIEW;
+
+        } catch (error) {
+            console.error('[StateMachine] App Generation Error:', error);
+            ctx.error = error as Error;
+            return State.ERROR;
+        }
+    }
+
+    /**
+     * Loop 2b: App Review
+     * AI validates code against tool usage rules
+     */
+    private async handleAppReview(ctx: StateMachineContext): Promise<State> {
+        if (!ctx.generatedApp || !ctx.generatedApp.html) {
+            return State.ERROR;
+        }
+
+        console.log('[StateMachine] Reviewing App Code...');
+
+        try {
+            const review = await this.aiPlanner.reviewAppCode(
+                ctx.generatedApp.html,
+                ctx.requiredTools
+            );
+
+            if (review.passed) {
+                console.log('[StateMachine] App Review PASSED');
+                ctx.reviewFeedback = []; // Clear feedback
+                return State.APP_VERIFICATION;
+            }
+
+            console.log('[StateMachine] App Review FAILED:', review.issues);
+
+            // If the reviewer auto-corrected the code, use it!
+            if (review.correctedCode) {
+                console.log('[StateMachine] Applying reviewer auto-correction...');
+                ctx.generatedApp.html = review.correctedCode;
+                // We trust the correction and move to verify
+                return State.APP_VERIFICATION;
+            }
+
+            // Otherwise, loop back to generation with feedback
+            ctx.reviewFeedback = review.issues;
+
+            // Safety check for infinite loops
+            if (ctx.appGenerationAttempts >= 3) {
+                console.warn('[StateMachine] Max app generation attempts reached during review. Proceeding anyway.');
+                return State.APP_VERIFICATION;
+            }
+
+            return State.APP_GENERATION;
+
+        } catch (error) {
+            console.error('[StateMachine] App Review Error:', error);
+            // Fail open ensures we don't get stuck if review crashes
+            return State.APP_VERIFICATION;
+        }
+    }
+
+    /**
+     * Loop 2c: App Verification
+     * AI checks if user requirements are met
+     */
+    private async handleAppVerification(ctx: StateMachineContext): Promise<State> {
+        if (!ctx.generatedApp || !ctx.generatedApp.html) {
+            return State.ERROR;
+        }
+
+        console.log('[StateMachine] Verifying requirements...');
+
+        try {
+            const verify = await this.aiPlanner.verifyRequirements(
+                ctx.generatedApp.html,
+                ctx.generatedApp.prompt // Check against original user prompt
+            );
+
+            if (verify.verified) {
+                console.log('[StateMachine] Verification PASSED');
+                ctx.verificationIssues = [];
+
+                // Success! Move to return
+                // First update the cache with the finalized app
+                this.appCache.set(ctx.generatedApp);
+                ctx.targetAppId = ctx.generatedApp.id;
+
+                return State.APP_RETURNED;
+            }
+
+            console.log('[StateMachine] Verification FAILED:', verify.missingRequirements);
+            ctx.verificationIssues = verify.missingRequirements;
+
+            if (verify.suggestion) {
+                ctx.verificationIssues.push(`Suggestion: ${verify.suggestion}`);
+            }
+
+            // Safety check for infinite loops
+            if (ctx.appGenerationAttempts >= 5) { // Allow a bit more for requirements
+                console.warn('[StateMachine] Max app generation attempts reached during verification. Returning best effort.');
+                this.appCache.set(ctx.generatedApp);
+                ctx.targetAppId = ctx.generatedApp.id;
+                return State.APP_RETURNED;
+            }
+
+            return State.APP_GENERATION;
+
+        } catch (error) {
+            console.error('[StateMachine] Verification Error:', error);
+            // Fail open
+            this.appCache.set(ctx.generatedApp);
+            ctx.targetAppId = ctx.generatedApp.id;
+            return State.APP_RETURNED;
+        }
+    }
+
     private async handleToolAgent(ctx: StateMachineContext): Promise<State> {
         // Tools are ready - move to app builder
         // If this is tool-only request (no app generation), execute and return
         if (ctx.intent === 'tool_only' && ctx.requiredTools.length > 0) {
             try {
                 const tool = ctx.requiredTools[0];
-                const result = await this.toolManager.executeTool(tool.name, ctx.matchedArgs || {});
-                ctx.response = { result };
+                const result = await this.executeToolWithRetry(tool, ctx.matchedArgs || {});
+                try {
+                    ctx.response = JSON.parse(result);
+                } catch {
+                    ctx.response = { result };
+                }
                 return State.END;
             } catch (error) {
+                // executeToolWithRetry handles retries and returns error JSON on failure
+                // but if something unexpected happens:
                 ctx.error = error as Error;
                 return State.ERROR;
             }

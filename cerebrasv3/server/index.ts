@@ -205,12 +205,23 @@ async function handleCreateWidget(
   command: DesktopCommandPayload,
 ): Promise<DesktopStatePayload> {
   sessionManager.mergeContext(session, command.contextSnapshot);
-  const contextSnapshot = {
+
+  // Build context snapshot, including cached widget content if updating
+  const contextSnapshot: Record<string, string> = {
     ...Object.fromEntries(session.context.entries()),
     ...(command.contextSnapshot ?? {}),
   };
+
+  // If updating an existing widget, get its content from cache (not from frontend)
+  if (command.targetWidgetId) {
+    const existingWidget = session.widgets.get(command.targetWidgetId);
+    if (existingWidget?.html) {
+      contextSnapshot['current_content'] = existingWidget.html;
+    }
+  }
+
   console.log('[handleCreateWidget] Prompt:', command.prompt);
-  console.log('[handleCreateWidget] Context:', JSON.stringify(contextSnapshot, null, 2));
+  console.log('[handleCreateWidget] Context keys:', Object.keys(contextSnapshot));
 
   // Note: Error diagnosis is now handled by the AI classifyIntent in the state machine
   // when the diagnose_error intent is detected. No manual regex parsing needed.

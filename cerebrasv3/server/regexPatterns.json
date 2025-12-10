@@ -8,43 +8,18 @@
     "description": "List files in a directory - args come from query or body"
   },
   {
-    "pattern": "^/api/mono/get_files_tool(?:\\?.*)?$",
-    "toolName": "get_files_tool",
-    "method": "*",
+    "pattern": "^/api/mono/tool_configurator(?:\\?.*)?$",
+    "method": "POST",
+    "toolName": "tool_configurator",
     "argMapping": {},
-    "priority": 10,
-    "description": "List files (alternate endpoint with _tool suffix)"
+    "priority": 50
   },
   {
-    "pattern": "^/api/mono/file_reader(?:\\?.*)?$",
-    "toolName": "file_reader",
-    "method": "*",
-    "argMapping": {},
-    "priority": 10,
-    "description": "Read file content"
-  },
-  {
-    "pattern": "^/api/mono/text_processor(?:\\?.*)?$",
-    "toolName": "text_processor",
-    "method": "*",
-    "argMapping": {},
-    "priority": 10,
-    "description": "Text processing operations"
-  },
-  {
-    "pattern": "^/api/mono/directory_navigator(?:\\?.*)?$",
-    "toolName": "directory_navigator",
-    "method": "*",
-    "argMapping": {},
-    "priority": 10,
-    "description": "Directory navigation"
-  },
-  {
-    "pattern": "^/api/mono/([a-z_]+)(?:\\?.*)?$",
+    "pattern": "^/api/mono/([a-z_0-9-]+)(?:\\?.*)?$",
     "toolName": "$1",
     "method": "*",
     "argMapping": {},
     "priority": 100,
-    "description": "Generic tool endpoint matcher"
+    "description": "Generic catch-all tool endpoint matcher"
   }
 ]

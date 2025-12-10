@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Musical Keyboard with Audio Visualizer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            max-width: 1200px;
+            width: 100%;
+            margin: 0 auto;
+        }
+        
+        .visualizer-container {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            backdrop-filter: blur(10px);
+            flex: 1;
+            min-height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        #visualizer {
+            width: 100%;
+            height: 100%;
+            border-radius: 10px;
+        }
+        
+        .keyboard-container {
+            background: rgba(0, 0, 0, 0.4);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .keyboard {
+            display: flex;
+            justify-content: center;
+            position: relative;
+            height: 150px;
+            user-select: none;
+        }
+        
+        .key {
+            position: relative;
+            cursor: pointer;
+            transition: all 0.1s ease;
+        }
+        
+        .white-key {
+            width: 50px;
+            height: 100%;
+            background: linear-gradient(to bottom, #fff 0%, #f0f0f0 100%);
+            border: 1px solid #ccc;
+            border-radius: 0 0 5px 5px;
+            margin: 0 1px;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            padding-bottom: 10px;
+            font-size: 12px;
+            color: #666;
+            font-weight: 500;
+        }
+        
+        .white-key:hover {
+            background: linear-gradient(to bottom, #f0f0f0 0%, #e0e0e0 100%);
+        }
+        
+        .white-key.active {
+            background: linear-gradient(to bottom, #667eea 0%, #764ba2 100%);
+            transform: translateY(2px);
+            color: white;
+        }
+        
+        .black-key {
+            width: 35px;
+            height: 65%;
+            background: linear-gradient(to bottom, #333 0%, #000 100%);
+            border-radius: 0 0 3px 3px;
+            position: absolute;
+            z-index: 2;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            padding-bottom: 8px;
+            font-size: 10px;
+            color: #999;
+            font-weight: 500;
+        }
+        
+        .black-key:hover {
+            background: linear-gradient(to bottom, #444 0%, #111 100%);
+        }
+        
+        .black-key.active {
+            background: linear-gradient(to bottom, #667eea 0%, #764ba2 100%);
+            transform: translateY(2px);
+            color: white;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 10px 15px;
+            border-radius: 10px;
+        }
+        
+        .control-group label {
+            color: white;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .control-group input[type="range"] {
+            width: 100px;
+        }
+        
+        .control-group select {
+            padding: 5px 10px;
+            border-radius: 5px;
+            border: none;
+            background: rgba(255, 255, 255, 0.9);
+        }
+        
+        .control-group button {
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: none;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: 500;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        .control-group button:hover {
+            transform: scale(1.05);
+        }
+        
+        .control-group button:active {
+            transform: scale(0.95);
+        }
+        
+        @media (max-width: 768px) {
+            .white-key {
+                width: 35px;
+            }
+            
+            .black-key {
+                width: 25px;
+            }
+            
+            .keyboard {
+                height: 120px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="visualizer-container">
+            <canvas id="visualizer"></canvas>
+        </div>
+        
+        <div class="keyboard-container">
+            <div class="keyboard" id="keyboard">
+                <!-- Keys will be generated by JavaScript -->
+            </div>
+            
+            <div class="controls">
+                <div class="control-group">
+                    <label for="volume">Volume:</label>
+                    <input type="range" id="volume" min="0" max="100" value="50">
+                    <span id="volumeValue">50%</span>
+                </div>
+                
+                <div class="control-group">
+                    <label for="waveform">Waveform:</label>
+                    <select id="waveform">
+                        <option value="sine">Sine</option>
+                        <option value="square">Square</option>
+                        <option value="sawtooth">Sawtooth</option>
+                        <option value="triangle">Triangle</option>
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <button id="recordBtn">Record</button>
+                    <button id="playBtn">Play Recording</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Audio context and nodes
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.connect(audioContext.destination);
+        
+        // Canvas setup
+        const canvas = document.getElementById('visualizer');
+        const ctx = canvas.getContext('2d');
+        
+        // Resize canvas
+        function resizeCanvas() {
+            const container = canvas.parentElement;
+            canvas.width = container.clientWidth - 40;
+            canvas.height = container.clientHeight - 40;
+        }
+        
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        
+        // Note frequencies
+        const notes = {
+            'C': 261.63,
+            'C#': 277.18,
+            'D': 293.66,
+            'D#': 311.13,
+            'E': 329.63,
+            'F': 349.23,
+            'F#': 369.99,
+            'G': 392.00,
+            'G#': 415.30,
+            'A': 440.00,
+            'A#': 466.16,
+            'B': 493.88,
+            'C2': 523.25
+        };
+        
+        // Active oscillators
+        const activeOscillators = {};
+        
+        // Recording
+        let isRecording = false;
+        let recordedNotes = [];
+        let recordStartTime = 0;
+        
+        // Create keyboard
+        function createKeyboard() {
+            const keyboard = document.getElementById('keyboard');
+            const whiteKeys = ['C', 'D', 'E', 'F', 'G', 'A', 'B', 'C2'];
+            const blackKeys = {'C#': 35, 'D#': 87, 'F#': 189, 'G#': 241, 'A#': 293};
+            
+            // Create white keys
+            whiteKeys.forEach((note, index) => {
+                const key = document.createElement('div');
+                key.className = 'key white-key';
+                key.dataset.note = note;
+                key.textContent = note;
+                key.style.left = `${index * 51}px`;
+                keyboard.appendChild(key);
+            });
+            
+            // Create black keys
+            Object.entries(blackKeys).forEach(([note, position]) => {
+                const key = document.createElement('div');
+                key.className = 'key black-key';
+                key.dataset.note = note;
+                key.textContent = note;
+                key.style.left = `${position}px`;
+                keyboard.appendChild(key);
+            });
+        }
+        
+        // Play note
+        function playNote(frequency, note) {
+            const volume = document.getElementById('volume').value / 100;
+            const waveform = document.getElementById('waveform').value;
+            
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.type = waveform;
+            oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+            
+            gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 1);
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(analyser);
+            
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 1);
+            
+            activeOscillators[note] = oscillator;
+            
+            // Record if recording
+            if (isRecording) {
+                recordedNotes.push({
+                    note: note,
+                    frequency: frequency,
+                    time: Date.now() - recordStartTime
+                });
+            }
+        }
+        
+        // Visualizer
+        function drawVisualizer() {
+            requestAnimationFrame(drawVisualizer);
+            
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            analyser.getByteFrequencyData(dataArray);
+            
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const barWidth = (canvas.width / bufferLength) * 2.5;
+            let barHeight;
+            let x = 0;
+            
+            for (let i = 0; i < bufferLength; i++) {
+                barHeight = (dataArray[i] / 255) * canvas.height * 0.8;
+                
+                const gradient = ctx.createLinearGradient(0, canvas.height - barHeight, 0, canvas.height);
+                gradient.addColorStop(0, '#667eea');
+                gradient.addColorStop(1, '#764ba2');
+                
+                ctx.fillStyle = gradient;
+                ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+                
+                x += barWidth + 1;
+            }
+        }
+        
+        // Event listeners
+        document.getElementById('keyboard').addEventListener('mousedown', (e) => {
+            if (e.target.classList.contains('key')) {
+                const note = e.target.dataset.note;
+                playNote(notes[note], note);
+                e.target.classList.add('active');
+            }
+        });
+        
+        document.getElementById('keyboard').addEventListener('mouseup', (e) => {
+            if (e.target.classList.contains('key')) {
+                e.target.classList.remove('active');
+            }
+        });
+        
+        document.getElementById('keyboard').addEventListener('mouseleave', (e) => {
+            if (e.target.classList.contains('key')) {
+                e.target.classList.remove('active');
+            }
+        });
+        
+        document.getElementById('volume').addEventListener('input', (e) => {
+            document.getElementById('volumeValue').textContent = e.target.value + '%';
+        });
+        
+        document.getElementById('recordBtn').addEventListener('click', () => {
+            isRecording = !isRecording;
+            const btn = document.getElementById('recordBtn');
+            
+            if (isRecording) {
+                recordedNotes = [];
+                recordStartTime = Date.now();
+                btn.textContent = 'Stop Recording';
+                btn.style.background = 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)';
+            } else {
+                btn.textContent = 'Record';
+                btn.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+            }
+        });
+        
+        document.getElementById('playBtn').addEventListener('click', () => {
+            if (recordedNotes.length > 0) {
+                recordedNotes.forEach(({note, frequency, time}) => {
+                    setTimeout(() => {
+                        playNote(frequency, note);
+                        const keyElement = document.querySelector(`[data-note="${note}"]`);
+                        if (keyElement) {
+                            keyElement.classList.add('active');
+                            setTimeout(() => keyElement.classList.remove('active'), 200);
+                        }
+                    }, time);
+                });
+            }
+        });
+        
+        // Initialize
+        createKeyboard();
+        drawVisualizer();
+    </script>
+</body>
+</html>

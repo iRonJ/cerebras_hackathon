@@ -88,6 +88,11 @@ export class OpenRouterProvider implements DesktopModelProvider {
 
   async chat(systemPrompt: string, userPrompt: string): Promise<string> {
     this.ensureKey();
+
+    const totalPromptChars = systemPrompt.length + userPrompt.length;
+    const estimatedTokens = Math.ceil(totalPromptChars / 4); // rough estimate: ~4 chars per token
+    console.log(`[OpenRouterProvider] Sending prompt: ${totalPromptChars} chars (~${estimatedTokens} tokens)`);
+
     const response = await fetch(this.endpoint, {
       method: 'POST',
       headers: {
@@ -113,6 +118,12 @@ export class OpenRouterProvider implements DesktopModelProvider {
     }
 
     const data = (await response.json()) as OpenRouterResponse;
-    return data.choices?.[0]?.message?.content ?? '';
+    const responseText = data.choices?.[0]?.message?.content ?? '';
+
+    const responseChars = responseText.length;
+    const responseTokens = Math.ceil(responseChars / 4);
+    console.log(`[OpenRouterProvider] Received response: ${responseChars} chars (~${responseTokens} tokens)`);
+
+    return responseText;
   }
 }

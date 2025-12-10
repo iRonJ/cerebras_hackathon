@@ -50,3 +50,9 @@ export interface DesktopStatePayload {
   backgroundProcesses: BackgroundProcess[];
   notice?: string;
 }
+
+export interface VirtualResponse {
+  content: string;
+  contentType: string;
+  filename?: string;
+}

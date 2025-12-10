@@ -12,8 +12,10 @@ export interface ToolDefinition {
     command: string;
     responseType: 'string' | 'list' | 'json';
     responseSample?: string;
+    usage?: string; // Example fetch() call for the frontend
     code?: string; // Content of the script
     language?: 'python' | 'shell';
+    pip_packages?: string[];
 }
 
 // Path to the venv python - can be overridden via PYTHON_PATH env var
@@ -62,6 +64,7 @@ export class ToolManager {
                     if (key === 'command') tool.command = value.replace(/`/g, '');
                     if (key === 'response type') tool.responseType = value.toLowerCase() as any;
                     if (key === 'response sample') tool.responseSample = value.replace(/`/g, '');
+                    // We don't save pip_packages in tools.md as they are installed on creation
                 }
             }
 
@@ -79,6 +82,50 @@ export class ToolManager {
         return Array.from(this.tools.values());
     }
 
+    async installPackages(packages: string[]) {
+        if (!packages || packages.length === 0) return;
+
+        console.log(`[ToolManager] Installing dependencies: ${packages.join(', ')}`);
+        const command = `${this.pythonPath} -m pip install ${packages.join(' ')}`;
+
+        try {
+            const { stdout, stderr } = await execAsync(command, { cwd: path.dirname(this.toolsDir) });
+            // pip writes to stderr/stdout mixed, usually stderr for progress
+            if (stderr) console.log('[ToolManager] pip output:', stderr);
+        } catch (error) {
+            console.error('[ToolManager] Package installation failed:', error);
+            // We log but don't crash, trying to proceed
+        }
+    }
+
+    private updateToolInMarkdown(entry: string, toolName: string) {
+        if (!fs.existsSync(this.indexPath)) {
+            fs.writeFileSync(this.indexPath, '# Tool Index\n\n' + entry.trim() + '\n');
+            return;
+        }
+
+        let content = fs.readFileSync(this.indexPath, 'utf-8');
+
+        // Split content into sections by "## " headers
+        const sections = content.split(/(?=^## )/m);
+
+        // Filter out any sections that match this tool name (remove all duplicates)
+        const filteredSections = sections.filter(section => {
+            const headerMatch = section.match(/^## (.+?)[\r\n]/);
+            if (headerMatch) {
+                return headerMatch[1].trim() !== toolName;
+            }
+            return true; // Keep non-tool sections (like the header)
+        });
+
+        // Add the new entry
+        filteredSections.push(entry.trim() + '\n');
+
+        // Rebuild the file
+        const newContent = filteredSections.join('\n').replace(/\n{3,}/g, '\n\n');
+        fs.writeFileSync(this.indexPath, newContent);
+    }
+
     async registerTool(tool: ToolDefinition) {
         // Save the script file
         const ext = tool.language === 'python' ? '.py' : '.sh';
@@ -90,12 +137,19 @@ export class ToolManager {
             fs.chmodSync(filePath, '755');
         }
 
-        // Update the command to point to the file if it's a generic placeholder
-        // But usually the AI should provide the correct command line.
-        // Let's assume the AI provides a command like `python3 tools/get_files.py ...`
-        // We might need to adjust paths.
+        // Install dependencies if specified
+        if (tool.pip_packages && tool.pip_packages.length > 0) {
+            await this.installPackages(tool.pip_packages);
+        }
 
-        // Append to tools.md
+        // Update the command to point to the file if it's a generic placeholder
+        // Auto-correct command path if it's missing 'tools/' prefix
+        if (tool.language === 'python' && tool.command.includes(filename) && !tool.command.includes(`tools/${filename}`)) {
+            console.log(`[ToolManager] Fixing command path for ${tool.name}`);
+            tool.command = tool.command.replace(filename, `tools/${filename}`);
+        }
+
+        // Update tools.md
         const entry = `
 ## ${tool.name}
 - **Description**: ${tool.description}
@@ -103,9 +157,10 @@ export class ToolManager {
 - **Command**: \`${tool.command}\`
 - **Response Type**: ${tool.responseType}
 - **Response Sample**: \`${tool.responseSample || ''}\`
+- **Usage**: \`${tool.usage || `fetch('${tool.apiEndpoint}').then(r => r.json())`}\`
 - **Created**: ${new Date().toISOString()}
 `;
-        fs.appendFileSync(this.indexPath, entry);
+        this.updateToolInMarkdown(entry, tool.name);
 
         // Update in-memory map
         this.tools.set(tool.name, tool);
@@ -122,19 +177,50 @@ export class ToolManager {
         // Replace python3 with venv python path
         command = command.replace(/^python3\s/, `${this.pythonPath} `);
 
+        // Extract all placeholder names from the command template
+        const placeholderMatches = command.match(/\{([a-zA-Z_]+)\}/g) || [];
+        const placeholders = placeholderMatches.map(p => p.slice(1, -1));
+
+        const normalizedArgs: Record<string, string> = { ...args };
+
+        // If there's exactly one placeholder and one arg, map them directly
+        if (placeholders.length === 1 && Object.keys(args).length === 1) {
+            const placeholder = placeholders[0];
+            const argKey = Object.keys(args)[0];
+            if (!(placeholder in normalizedArgs) && argKey !== placeholder) {
+                normalizedArgs[placeholder] = args[argKey];
+                console.log(`[ToolManager] Single-arg inference: '${argKey}' -> '${placeholder}'`);
+            }
+        }
+
         // Replace placeholders {arg} with actual values, properly quoted for shell
-        console.log(`[ToolManager] Executing ${name} with args:`, args);
-        for (const [key, value] of Object.entries(args)) {
+        console.log(`[ToolManager] Executing ${name} with args:`, normalizedArgs);
+        for (const [key, value] of Object.entries(normalizedArgs)) {
+            // Handle potentially non-string values (e.g. error objects from previous content)
+            let strValue = value;
+            if (typeof value !== 'string') {
+                if (value === undefined || value === null) {
+                    strValue = '';
+                } else {
+                    try {
+                        strValue = JSON.stringify(value);
+                    } catch {
+                        strValue = String(value);
+                    }
+                }
+            }
+
             // Handle empty values - use '.' for path, or quote empty string
-            let finalValue = value;
-            if (value === '' || value === undefined || value === null) {
+            let finalValue = strValue;
+            if (strValue === '') {
                 finalValue = key === 'path' ? '.' : "''";  // Default path to current dir
             } else {
                 // Quote values that contain spaces or special shell characters
-                const needsQuoting = /[\s"'`$\\|&;<>(){}\[\]*?!#~]/.test(value);
-                finalValue = needsQuoting ? `'${value.replace(/'/g, "'\\''")}'` : value;
+                const needsQuoting = /[\s"'`$\\|&;<>(){}\[\]*?!#~]/.test(strValue);
+                finalValue = needsQuoting ? `'${strValue.replace(/'/g, "'\\''")}'` : strValue;
             }
-            command = command.replace(`{${key}}`, finalValue);
+            // Replace ALL occurrences of this placeholder
+            command = command.replaceAll(`{${key}}`, finalValue);
         }
         console.log(`[ToolManager] Command: ${command}`);
         this.lastExecutedCommand = command;  // Track for repair agent
@@ -142,12 +228,21 @@ export class ToolManager {
         // Ensure command runs from server root so paths like 'tools/script.py' work
         try {
             const { stdout, stderr } = await execAsync(command, { cwd: path.dirname(this.toolsDir) });
+
+            if (stdout) {
+                // Limit logging if too large? For now log all as requested.
+                console.log(`[ToolManager] ${name} stdout:\n${stdout.trim()}`);
+            }
             if (stderr) {
-                console.warn(`Tool ${name} stderr:`, stderr);
+                console.warn(`[ToolManager] ${name} stderr:\n${stderr.trim()}`);
             }
             return stdout.trim();
-        } catch (error) {
-            throw new Error(`Tool execution failed: ${(error as Error).message}`);
+        } catch (error: any) {
+            // exec error object often contains stdout/stderr
+            if (error.stdout) console.log(`[ToolManager] ${name} failed stdout:\n${error.stdout.toString().trim()}`);
+            if (error.stderr) console.error(`[ToolManager] ${name} failed stderr:\n${error.stderr.toString().trim()}`);
+
+            throw new Error(`Tool execution failed: ${error.message}`);
         }
     }
 }
