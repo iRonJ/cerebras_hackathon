@@ -3,10 +3,9 @@
 A next-generation AI-powered desktop environment where applications are generated, run, and repaired in real-time by a sovereign agentic system. Powered by Cerebras' ultra-fast inference.
 
 ## Overview
-https://github.com/iRonJ/cerebras_hackathon/raw/refs/heads/main/assets/aiDesktop.mp4
-<video src="https://github.com/iRonJ/cerebras_hackathon/raw/refs/heads/main/assets/aiDesktop.mp4" controls width="100%"></video>
+[![Demo Video](https://img.youtube.com/vi/eFMeGK16u8U/0.jpg)](https://www.youtube.com/watch?v=eFMeGK16u8U)
 
-[Download Demo Video](assets/aiDesktop.mp4)
+[Watch on YouTube](https://youtu.be/eFMeGK16u8U)
 
 This project represents a shift from static applications to a **dynamic, agentic OS**. Instead of pre-compiled binaries, the "OS" is a conversation with a high-speed LLM that can:
 1.  **Generate Apps**: Create full HTML/JS/WebGL applications on the fly.
