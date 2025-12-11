@@ -114,7 +114,16 @@ apiRouter.use('/mono', async (req: Request, res: Response) => {
     console.log(`[mono-api] State machine completed in ${Date.now() - start}ms, state: ${result.state}`);
 
     if (result.success) {
-      res.json(result.response);
+      if (result.response && result.response._raw_content) {
+        // Handle virtual/raw content response
+        res.setHeader('Content-Type', result.response.contentType || 'text/plain');
+        if (result.response.filename && result.response.contentType != 'text/html') {
+          res.setHeader('Content-Disposition', `attachment; filename="${result.response.filename}"`);
+        }
+        res.send(result.response.content);
+      } else {
+        res.json(result.response);
+      }
     } else {
       res.status(500).json({ error: result.error || 'Request processing failed' });
     }

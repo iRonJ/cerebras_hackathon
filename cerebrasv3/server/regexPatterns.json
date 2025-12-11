@@ -15,6 +15,13 @@
     "priority": 50
   },
   {
+    "pattern": "^/api/mono/text_editor(?:\\?.*)?$",
+    "method": "POST",
+    "toolName": "text_editor",
+    "argMapping": {},
+    "priority": 50
+  },
+  {
     "pattern": "^/api/mono/([a-z_0-9-]+)(?:\\?.*)?$",
     "toolName": "$1",
     "method": "*",

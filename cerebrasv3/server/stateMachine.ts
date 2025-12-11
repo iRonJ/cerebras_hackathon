@@ -21,6 +21,7 @@ export enum State {
     INTENT_UPDATE_APP = 'INTENT_UPDATE_APP',
     DIAGNOSE_ERROR = 'DIAGNOSE_ERROR',
     TOOL_AGENT = 'TOOL_AGENT',
+    VIRTUAL_RESPONSE = 'VIRTUAL_RESPONSE',
 
     // Validated 2-Loop Architecture States
     TOOL_PREPARATION = 'TOOL_PREPARATION', // Loop 1: Tool Prep
@@ -61,7 +62,7 @@ export interface StateMachineContext {
     matchedArgs?: Record<string, string>;
 
     // Intent results
-    intent?: 'new_app' | 'update_app' | 'tool_only' | 'diagnose_error';
+    intent?: 'new_app' | 'update_app' | 'tool_only' | 'diagnose_error' | 'virtual_response';
     targetAppId?: string;
 
     // Cached app data
@@ -131,6 +132,7 @@ export class RequestStateMachine {
         this.handlers.set(State.INTENT_UPDATE_APP, this.handleIntentUpdateApp.bind(this));
         this.handlers.set(State.DIAGNOSE_ERROR, this.handleDiagnoseError.bind(this));
         this.handlers.set(State.TOOL_AGENT, this.handleToolAgent.bind(this));
+        this.handlers.set(State.VIRTUAL_RESPONSE, this.handleVirtualResponse.bind(this));
 
         // 2-Loop Architecture Handlers
         this.handlers.set(State.TOOL_PREPARATION, this.handleToolPreparation.bind(this));
@@ -420,12 +422,52 @@ export class RequestStateMachine {
                     return State.INTENT_UPDATE_APP;
                 case 'diagnose_error':
                     return State.DIAGNOSE_ERROR;
+                case 'virtual_response':
+                    return State.VIRTUAL_RESPONSE;
                 case 'tool_only':
                     return State.TOOL_PREPARATION;
                 default:
                     return State.TOOL_PREPARATION;
             }
         } catch (error) {
+            ctx.error = error as Error;
+            return State.ERROR;
+        }
+    }
+
+    private async handleVirtualResponse(ctx: StateMachineContext): Promise<State> {
+        console.log('[StateMachine] Generating Virtual Response...');
+        const userPrompt = ctx.request.body?.prompt || ctx.request.query?.prompt || `Generate content for ${ctx.request.method} ${ctx.request.path} ${JSON.stringify(ctx.request.query)}`;
+
+        const context = {
+            apiRoot: ctx.apiRoot,
+            tools: ctx.requiredTools.map(t => ({
+                name: t.name,
+                description: t.description,
+                endpoint: t.apiEndpoint,
+                responseSample: t.responseSample
+            }))
+        };
+
+        try {
+            const result = await this.aiPlanner.generateVirtualResponse(
+                userPrompt,
+                context
+            );
+
+            console.log(`[StateMachine] Virtual response generated (${result.contentType})`);
+
+            // Set the raw response
+            ctx.response = {
+                _raw_content: true,
+                content: result.content,
+                contentType: result.contentType,
+                filename: result.filename
+            };
+
+            return State.END;
+        } catch (error) {
+            console.error('[StateMachine] Virtual response generation failed:', error);
             ctx.error = error as Error;
             return State.ERROR;
         }

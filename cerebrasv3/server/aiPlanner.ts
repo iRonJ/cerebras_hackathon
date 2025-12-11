@@ -3,7 +3,7 @@ import { ToolManager, ToolDefinition } from './toolManager';
 import type { CachedAppMeta } from './appCache';
 
 export interface IntentResult {
-    intent: 'new_app' | 'update_app' | 'tool_only' | 'diagnose_error';
+    intent: 'new_app' | 'update_app' | 'tool_only' | 'diagnose_error' | 'virtual_response';
     targetAppId?: string;
     requiredTools: string[];
     newToolDescription?: string;
@@ -39,13 +39,13 @@ export class AIPlanner {
         const toolsList = tools.map(t => `- ${t.name}: ${t.description} (Endpoint: ${t.apiEndpoint})`).join('\n');
 
         const prompt = `
-You are an intelligent API dispatcher for the Cerebral Browser Based Desktop Environment system.
+You are an intelligent API dispatcher for the Cerebral Browser Based Desktop Environment system. We want as much compute to be done on the web frontend as possible using web apis like audio graph and threejs.
 
 ROUTING RULES:
 1. If the request path matches a known tool endpoint exactly, use "execute_tool"
 2. If the request implies creating a new HTML/JS application, use "create_app" 
 3. If the request references an existing app by ID or context, use "update_app"
-4. Only create new tools for system resources (file system, shell, network)
+4. Only create new tools for system resources (file system, shell, network) that can't be done on the frontend.
 5. Do NOT generate tools that only output HTML or JS/TS/JAX etc.
 
 User Request: ${method} ${path}
@@ -603,15 +603,17 @@ CLASSIFICATION RULES:
 2. "update_app" - User wants to MODIFY an existing app (references app by ID, title, or description)
 3. "tool_only" - User just wants data/tool execution, NO app generation
 4. "diagnose_error" - User is REPORTING AN ERROR, BUG, or PROBLEM with an existing app (keywords: error, bug, broken, not working, issue, problem, fix, doesn't work)
+5. "virtual_response" - User wants raw content generated dynamically like an html page (e.g. "generate a CSV", "create a JSON report", "write a poem") without creating a persistent app.
 
 If "update_app", identify which existing app ID they're referring to.
 If "diagnose_error", the system will analyze tool code to determine if the issue is in app or tool code.
+If "virtual_response", the user wants the AI to generate the html file/content directly as the HTTP response.
 List ALL tools from the available list that would be needed for this request.
 ONLY set newToolDescription if absolutely necessary (no existing tool can do it).
 
 Respond with JSON:
 {
-  "intent": "new_app" | "update_app" | "tool_only" | "diagnose_error",
+  "intent": "new_app" | "update_app" | "tool_only" | "diagnose_error" | "virtual_response",
   "targetAppId": "app_id if updating or diagnosing, otherwise null",
   "requiredTools": ["tool_name1", "tool_name2"],
   "newToolDescription": "description if new tool needed (rare!), otherwise null",
@@ -877,6 +879,66 @@ Respond with JSON:
             console.error("[AIPlanner] generateApp parse error:", e);
             throw new Error(`Failed to generate app: ${(e as Error).message}`);
         }
+    }
+    async generateVirtualResponse(
+        prompt: string,
+        context: {
+            apiRoot: string;
+            tools: Array<{ name: string; description: string; endpoint: string; responseSample?: string }>;
+        }
+    ): Promise<{ content: string; contentType: string; filename?: string }> {
+        const toolsInfo = context.tools.map(t =>
+            `- Name: ${t.name}\n  Description: ${t.description}\n  Endpoint: ${t.endpoint}\n  Sample Output: ${t.responseSample || 'N/A'}`
+        ).join('\n');
+
+        const genPrompt = `
+You are a DYNAMIC CONTENT GENERATOR. The user wants you to generate a specific file or content response based on their request.
+
+USER REQUEST: "${prompt}"
+
+AVAILABLE TOOLS:
+${toolsInfo}
+
+INSTRUCTIONS:
+1. Generate the content requested by the user.
+2. You can use the tools if needed to get data, but your final output must be the file content itself.
+3. Determine the correct Content-Type for this response (e.g. text/html, application/json, text/csv).
+4. If it's a file download, suggest a filename.
+
+Respond with JSON:
+{
+  "content": "the full content string (escaped for JSON)",
+  "contentType": "mime/type",
+  "filename": "suggested_filename.ext (optional)"
+}
+`;
+        let retries = 0;
+        const maxRetries = 1;
+        let lastError: any;
+
+        while (retries <= maxRetries) {
+            try {
+                const promptToUse = retries > 0
+                    ? genPrompt + "\n\nIMPORTANT: Your previous response was invalid JSON. Please ensure you respond with ONLY valid JSON, no markdown formatting, no comments."
+                    : genPrompt;
+
+                const responseText = await this.provider.chat(promptToUse, `Generate Virtual Response (Attempt ${retries + 1})`);
+                const match = responseText.match(/[\[{].*[\]}]/s);
+
+                if (!match) {
+                    throw new Error("No JSON found in response");
+                }
+
+                return JSON.parse(match[0]);
+            } catch (e) {
+                lastError = e;
+                console.warn(`[AIPlanner] Virtual response generation failed (Attempt ${retries + 1}):`, e);
+                retries++;
+            }
+        }
+
+        console.error("Failed to parse virtual response JSON after retries:", lastError);
+        throw new Error(`Failed to parse virtual response JSON: ${(lastError as Error).message}`);
     }
 }
 
