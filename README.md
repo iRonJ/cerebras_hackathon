@@ -4,7 +4,7 @@ A next-generation AI-powered desktop environment where applications are generate
 
 ## Overview
 
-<video src="assets/aiDesktop.mp4" controls width="100%"></video>
+<video src="https://github.com/iRonJ/cerebras_hackathon/raw/refs/heads/main/assets/aiDesktop.mp4" controls width="100%"></video>
 
 [Download Demo Video](assets/aiDesktop.mp4)
 
