@@ -1,74 +1,113 @@
-# Cerebras OS - OpenRouter Hackathon Project
+# Cerebras OS v3 - Agentic Desktop Environment
 
-A real-time, widget-based OS interface powered by Cerebras' ultra-fast LLM inference through OpenRouter.
+A next-generation AI-powered desktop environment where applications are generated, run, and repaired in real-time by a sovereign agentic system. Powered by Cerebras' ultra-fast inference.
 
 ## Overview
 
-This project showcases the power of Cerebras' fast inference capabilities by creating a responsive, widget-based interface where every user interaction is mediated by an LLM in real-time. Built using Blazor Server and .NET 8, it demonstrates how Cerebras' speed enables new UI paradigms where AI can be embedded directly in the interaction loop.
+<video src="assets/aiDesktop.mp4" controls width="100%"></video>
 
-## Key Features
-
-- **Real-time LLM Interactions**: Leveraging Cerebras' fast inference times to enable immediate responses to user interactions
-- **Live-updating Widgets**: Dynamic widgets that can auto-update based on LLM decisions
-- **Contextual Background Processing**: Uses OpenRouter's search capabilities to enrich widget context asynchronously
-- **Draggable UI Components**: Modern, flexible interface with draggable and resizable widgets
+This project represents a shift from static applications to a **dynamic, agentic OS**. Instead of pre-compiled binaries, the "OS" is a conversation with a high-speed LLM that can:
+1.  **Generate Apps**: Create full HTML/JS/WebGL applications on the fly.
+2.  **Execute Tools**: Bridge the gap between the web frontend and the host system using Python tools.
+3.  **Self-Repair**: Detect errors in both app code and system tools, and autonomously rewrite them to fix the issue.
 
 ## Architecture
 
-The system is built around a single primary API endpoint - Cerebras inference through OpenRouter. This architecture decision was made possible by Cerebras' exceptional speed, allowing us to use their LLM for everything from UI generation to decision-making.
+The system is built on a modern Node.js stack with a unique **Agentic State Machine** core.
 
-### Components:
+```mermaid
+graph TD
+    User[User Request] --> Monolith[Mono API Server]
+    Monolith --> StateMachine[Agentic State Machine]
+    
+    subgraph "Loop 1: Tool Preparation"
+        StateMachine --> AIPlanner
+        AIPlanner --> ToolManager
+        ToolManager -->|Check/Update| PythonTools[Python Tools]
+        PythonTools -->|Self-Repair| AIPlanner
+    end
+    
+    subgraph "Loop 2: App Generation"
+        StateMachine --> AppGen[App Generator]
+        AppGen --> AppReview[Code Reviewer]
+        AppReview --> AppVerify[Requirements Validator]
+    end
+    
+    AppVerify -->|Success| Frontend[Vite Frontend]
+    Frontend -->|Render| Widget[Live Widget]
+```
 
-1. **OpenRouterService**: Core service that interfaces with Cerebras through OpenRouter
-   - Uses qwen3-32b model exclusively on Cerebras hardware
-   - Handles structured JSON output for widget generation
-   - Manages context injection for stateful interactions
+### Key Components
 
-2. **UserSessionState**: Background processing system
-   - Maintains widget state
-   - Manages asynchronous context updates through OpenRouter search
-   - Handles live data refresh for dynamic widgets
+1.  **Server (`cerebrasv3/server`)**: A robust Express/TypeScript backend that hosts the State Machine.
+    *   **Intent Classification**: Determines if you want a new app, a tool execution, or a "virtual response" (raw content).
+    *   **Tool Manager**: Manages a library of Python scripts that grant system access (Filesystem, Hardware, Audio).
+    *   **Self-Healing**: If a tool fails (e.g., syntax error, missing dependency), the system captures the error, feeds it back to the LLM, and **rewrites the Python code** automatically.
 
-3. **Interactive UI**:
-   - Real-time widget generation and updates
-   - Drag-and-drop interface
-   - Live data indicators
-   - Automatic state management
+2.  **Frontend (`cerebrasv3/client`)**: A Vite/React-based desktop interface.
+    *   **Window Manager**: Draggable, resizable windows for generated apps.
+    *   **Live Injection**: Receives HTML/JS payloads from the server and injects them into sandboxed containers.
 
-## Performance
+3.  **Cerebras Engine**: The brain of the operation.
+    *   Utilizes `llama3.1-70b` or `qwen` models via Cerebras API for sub-second inference.
 
-The system's responsiveness is made possible by Cerebras' infrastructure:
-- Sub-second response times for widget generation
-- Real-time UI updates based on LLM decisions
-- Smooth interaction even with multiple live-updating widgets
+## Features
 
-## Technical Stack
+### 🛠️ Dynamic Tool System
+The system doesn't just call APIs—it **writes** them. If you ask for "a tool to check my CPU temp", and it doesn't exist:
+1.  The Planner designs the tool.
+2.  The State Machine generates the Python script (`server/tools/cpu_temp.py`).
+3.  The Tool Manager registers it.
+4.  The App uses it immediately.
 
-- .NET 8 Blazor Server
-- Cerebras inference (via OpenRouter)
-- Background processing for context enrichment
-- Real-time WebSocket communications
-- Modern CSS for widget styling
+### 🧠 Agentic State Machine
+A sophisticated 2-loop architecture ensures reliability:
+*   **Tool Prep Loop**: Ensures all necessary system access tools exist and are functional *before* writing any UI code.
+*   **App Gen Loop**: Generates the UI, reviews the code for security/syntax issues, and verifies it meets the user's prompt.
+
+### 👻 Virtual API Responses
+For requests that don't need a UI (e.g., "Generate a CSV report of my files"), the system bypasses the App Generator and streams the raw content directly to the client, acting as a virtual file server.
 
 ## Getting Started
 
-1. Clone the repository
-2. Set your OpenRouter API key:
-   ```bash
-   export OPENROUTER_API_KEY=your_key_here
-   ```
-3. Run the application:
-   ```bash
-   dotnet run
-   ```
+### Prerequisites
+*   Node.js v18+
+*   Python 3.9+ (for tool execution)
+*   Cerebras API Key
 
-## Architecture Notes
+### Installation
 
-This project demonstrates a new paradigm in UI development where the LLM is fast enough to be part of the immediate interaction loop, rather than an asynchronous backend service. This is only possible because of Cerebras' inference speed, allowing us to:
+1.  Navigate to the project directory:
+    ```bash
+    cd cerebrasv3
+    ```
 
-- Generate HTML in real-time
-- Make instant decisions about widget behavior
-- Provide immediate feedback to user actions
-- Handle multiple concurrent updates
+2.  Install dependencies:
+    ```bash
+    npm install
+    ```
 
-The background queue for OpenRouter search provides additional context without impacting the main interaction loop, enriching the LLM's responses while maintaining responsiveness.
+3.  Set up environment:
+    ```bash
+    export CEREBRAS_API_KEY=your_key_here
+    export DESKTOP_AI_PROVIDER=cerebras
+    ```
+
+### Running
+
+To launch both the backend server and the frontend client:
+
+```bash
+npm run dev
+```
+
+*   **Frontend**: http://localhost:5173
+*   **Backend**: http://localhost:4000
+
+## Directory Structure
+
+*   `cerebrasv3/server/`: Backend source code.
+    *   `stateMachine.ts`: Core agent logic.
+    *   `aiPlanner.ts`: LLM interaction layer.
+    *   `tools/`: Directory where Python tools are generated and stored.
+*   `cerebrasv3/src/`: Frontend React application.
