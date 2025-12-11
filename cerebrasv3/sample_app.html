@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D UMAP Photo Visualization</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #000000;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: rgba(20, 20, 20, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.3);
+            z-index: 100;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .header .subtitle {
+            font-size: 0.875rem;
+            color: #a0a0a0;
+            margin-top: 0.25rem;
+        }
+
+        .controls {
+            background: rgba(20, 20, 20, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 1rem 2rem;
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .path-input-group {
+            display: flex;
+            gap: 0.5rem;
+            flex: 1;
+            min-width: 300px;
+        }
+
+        .path-input {
+            flex: 1;
+            padding: 0.5rem 1rem;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            font-size: 0.875rem;
+            font-family: 'Monaco', 'Menlo', monospace;
+            background: rgba(255, 255, 255, 0.1);
+            color: #ffffff;
+            transition: border-color 0.2s, background-color 0.2s;
+        }
+
+        .path-input:focus {
+            outline: none;
+            border-color: #667eea;
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .path-input::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            white-space: nowrap;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.15);
+            color: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.25);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .stats {
+            margin-left: auto;
+            display: flex;
+            gap: 1.5rem;
+            font-size: 0.875rem;
+        }
+
+        .stat {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .stat-label {
+            color: #a0a0a0;
+            font-size: 0.75rem;
+        }
+
+        .stat-value {
+            font-weight: 600;
+            color: #ffffff;
+        }
+
+        .main-container {
+            flex: 1;
+            display: flex;
+            padding: 1rem;
+            gap: 1rem;
+            min-height: 0;
+        }
+
+        .visualization {
+            flex: 1;
+            background: rgba(20, 20, 20, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+            position: relative;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        #plot {
+            width: 100%;
+            height: 100%;
+        }
+
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #a0a0a0;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .error {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #dc2626;
+            padding: 2rem;
+            background: rgba(20, 20, 20, 0.95);
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            max-width: 400px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .error h3 {
+            margin-bottom: 0.5rem;
+            font-size: 1.125rem;
+            color: #ffffff;
+        }
+
+        .error p {
+            font-size: 0.875rem;
+            color: #a0a0a0;
+        }
+
+        .image-preview {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #1a1a1a;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            padding: 1rem;
+            z-index: 1000;
+            max-width: 90vw;
+            max-height: 90vh;
+            display: none;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .image-preview img {
+            max-width: 100%;
+            max-height: 70vh;
+            border-radius: 8px;
+        }
+
+        .image-preview .info {
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+            font-size: 0.875rem;
+        }
+
+        .image-preview .info-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .image-preview .info-label {
+            color: #a0a0a0;
+            font-weight: 500;
+        }
+
+        .image-preview .info-value {
+            color: #ffffff;
+        }
+
+        .command-btn {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: 0.5rem;
+            color: #ffffff;
+        }
+
+        .command-btn:hover {
+            background: rgba(255, 255, 255, 0.25);
+            transform: translateY(-1px);
+        }
+
+        .command-btn.open {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .command-btn.open:hover {
+            background: #5a67d8;
+        }
+
+        .command-btn.reveal {
+            background: #48bb78;
+            color: white;
+            border-color: #48bb78;
+        }
+
+        .command-btn.reveal:hover {
+            background: #38a169;
+        }
+
+        .image-preview .close {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            width: 32px;
+            height: 32px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #ffffff;
+        }
+
+        .image-preview .close:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 999;
+            display: none;
+        }
+
+        @media (max-width: 768px) {
+
+            .header,
+            .controls {
+                padding: 0.75rem 1rem;
+            }
+
+            .header h1 {
+                font-size: 1.25rem;
+            }
+
+            .path-input-group {
+                flex-direction: column;
+                min-width: 100%;
+            }
+
+            .stats {
+                flex-direction: column;
+                gap: 0.5rem;
+                margin-left: 0;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <h1>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                <polyline points="21 15 16 10 5 21"></polyline>
+            </svg>
+            3D UMAP Photo Visualization
+        </h1>
+        <div class="subtitle">Explore your photo library with CLIP embeddings and UMAP dimensionality reduction (JPEG,
+            HEIF, PNG)</div>
+    </div>
+
+    <div class="controls">
+        <div class="path-input-group">
+            <input type="text" class="path-input" id="pathInput" placeholder="/Users/ronj/Desktop"
+                value="/Users/ronj/Desktop">
+            <button class="btn btn-secondary" onclick="selectFolder()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+                Browse
+            </button>
+        </div>
+        <button class="btn btn-primary" onclick="loadData()" id="loadBtn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            Load Photos
+        </button>
+        <button class="btn btn-secondary" onclick="resetView()" id="resetBtn" disabled>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="1 4 1 10 7 10"></polyline>
+                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+            </svg>
+            Reset View
+        </button>
+        <div class="stats">
+            <div class="stat">
+                <span class="stat-label">Images</span>
+                <span class="stat-value" id="imageCount">0</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">Formats</span>
+                <span class="stat-value" id="formatCount">0</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">Total Pixels</span>
+                <span class="stat-value" id="totalSize">0 MP</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="visualization">
+            <div id="plot"></div>
+            <div class="loading" id="loading" style="display: none;">
+                <div class="spinner"></div>
+                <div>Processing photos and extracting embeddings...</div>
+            </div>
+            <div class="error" id="error" style="display: none;">
+                <h3>Error Loading Photos</h3>
+                <p id="errorMessage">Unable to load photo library. Please check the path and try again.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="overlay" id="overlay" onclick="closePreview()"></div>
+    <div class="image-preview" id="preview">
+        <button class="close" onclick="closePreview()"></button>
+        <img id="previewImage" src="" alt="">
+        <div class="info" id="previewInfo"></div>
+    </div>
+
+    <script>
+        let plotData = null;
+        let currentLayout = null;
+        let currentImageData = null;
+        let currentDirectory = null;
+
+        async function selectFolder() {
+            try {
+                const response = await fetch('/api/mono/root_folder_selector');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const selectedPath = await response.text();
+                document.getElementById('pathInput').value = selectedPath;
+            } catch (err) {
+                console.error('Error selecting folder:', err);
+                showError('Failed to open folder selector');
+            }
+        }
+
+        async function calculateSizeMetadata(data) {
+            const promises = data.map(async (item) => {
+                try {
+                    const response = await fetch('/api/mono/metadata_calculator', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            format: item.metadata.format,
+                            dimensions: item.metadata.dimensions
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const calculatedMetadata = await response.json();
+                    return {
+                        ...item,
+                        metadata: {
+                            ...item.metadata,
+                            size: calculatedMetadata.size
+                        }
+                    };
+                } catch (err) {
+                    console.error('Error calculating size for', item.path, err);
+                    // Return original item if calculation fails
+                    return {
+                        ...item,
+                        metadata: {
+                            ...item.metadata,
+                            size: 0
+                        }
+                    };
+                }
+            });
+
+            return Promise.all(promises);
+        }
+
+        async function loadData() {
+            const loadBtn = document.getElementById('loadBtn');
+            const loading = document.getElementById('loading');
+            const error = document.getElementById('error');
+            const resetBtn = document.getElementById('resetBtn');
+            const pathInput = document.getElementById('pathInput');
+
+            const directory = pathInput.value.trim();
+            if (!directory) {
+                showError('Please enter a folder path');
+                return;
+            }
+
+            currentDirectory = directory;
+            loadBtn.disabled = true;
+            loading.style.display = 'block';
+            error.style.display = 'none';
+
+            try {
+                const response = await fetch('/api/mono/image_embeddings_3d', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ directory: directory })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                if (!data || data.length === 0) {
+                    throw new Error('No images found in the specified folder');
+                }
+
+                // Calculate size metadata for all images
+                const dataWithSizes = await calculateSizeMetadata(data);
+                plotData = dataWithSizes;
+                visualizeData(dataWithSizes);
+                updateStats(dataWithSizes);
+                resetBtn.disabled = false;
+
+            } catch (err) {
+                console.error('Error loading data:', err);
+                showError(err.message);
+            } finally {
+                loading.style.display = 'none';
+                loadBtn.disabled = false;
+            }
+        }
+
+        function showError(message) {
+            const error = document.getElementById('error');
+            const errorMessage = document.getElementById('errorMessage');
+            errorMessage.textContent = message;
+            error.style.display = 'block';
+        }
+
+        function visualizeData(data) {
+            const plotDiv = document.getElementById('plot');
+
+            // Extract coordinates and metadata
+            const x = data.map(d => d.coordinates[0]);
+            const y = data.map(d => d.coordinates[1]);
+            const z = data.map(d => d.coordinates[2]);
+
+            // Color by distance to nearest neighbor
+            const distances = data.map(d => d.distanceToNearestNeighbor || 0);
+
+            // Size by image size (log scale based on pixel count)
+            const sizes = data.map(d => {
+                const pixels = d.metadata.size || 0;
+                return Math.max(5, Math.min(20, Math.log(pixels + 1) * 2));
+            });
+
+            // Create hover text
+            const hoverText = data.map(d => {
+                const filename = d.path.split('/').pop();
+                const pixels = d.metadata.size || 0;
+                const megapixels = (pixels / 1000000).toFixed(2);
+                const distance = (d.distanceToNearestNeighbor || 0).toFixed(3);
+                return `<b>${filename}</b><br>` +
+                    `Format: ${d.metadata.format}<br>` +
+                    `Size: ${megapixels} MP<br>` +
+                    `Dimensions: ${d.metadata.dimensions.width}${d.metadata.dimensions.height}<br>` +
+                    `Nearest Neighbor Distance: ${distance}`;
+            });
+
+            const trace = {
+                x: x,
+                y: y,
+                z: z,
+                mode: 'markers',
+                type: 'scatter3d',
+                marker: {
+                    size: sizes,
+                    color: distances,
+                    colorscale: 'Viridis',
+                    showscale: true,
+                    colorbar: {
+                        title: 'Distance to Nearest Neighbor',
+                        tickformat: '.3f',
+                        font: { color: '#ffffff' },
+                        titlefont: { color: '#ffffff' },
+                        tickfont: { color: '#ffffff' }
+                    },
+                    line: {
+                        color: 'rgba(255, 255, 255, 0.5)',
+                        width: 0.5
+                    }
+                },
+                text: hoverText,
+                hoverinfo: 'text',
+                customdata: data
+            };
+
+            const layout = {
+                title: {
+                    text: 'Photo Library - 3D UMAP Visualization',
+                    font: { size: 16, color: '#ffffff' }
+                },
+                scene: {
+                    xaxis: {
+                        title: 'UMAP 1',
+                        gridcolor: 'rgba(255, 255, 255, 0.1)',
+                        titlefont: { color: '#ffffff' },
+                        tickfont: { color: '#ffffff' },
+                        zerolinecolor: 'rgba(255, 255, 255, 0.1)'
+                    },
+                    yaxis: {
+                        title: 'UMAP 2',
+                        gridcolor: 'rgba(255, 255, 255, 0.1)',
+                        titlefont: { color: '#ffffff' },
+                        tickfont: { color: '#ffffff' },
+                        zerolinecolor: 'rgba(255, 255, 255, 0.1)'
+                    },
+                    zaxis: {
+                        title: 'UMAP 3',
+                        gridcolor: 'rgba(255, 255, 255, 0.1)',
+                        titlefont: { color: '#ffffff' },
+                        tickfont: { color: '#ffffff' },
+                        zerolinecolor: 'rgba(255, 255, 255, 0.1)'
+                    },
+                    bgcolor: 'rgba(20, 20, 20, 0.8)',
+                    camera: {
+                        eye: { x: 1.5, y: 1.5, z: 1.5 }
+                    }
+                },
+                paper_bgcolor: 'transparent',
+                plot_bgcolor: 'transparent',
+                margin: { l: 0, r: 0, t: 40, b: 0 },
+                hovermode: 'closest',
+                font: { color: '#ffffff' }
+            };
+
+            const config = {
+                responsive: true,
+                displayModeBar: true,
+                displaylogo: false,
+                modeBarButtonsToRemove: ['pan3d', 'select3d', 'lasso3d'],
+                toImageButtonOptions: {
+                    format: 'png',
+                    filename: 'umap-visualization',
+                    height: 800,
+                    width: 1200,
+                    scale: 2
+                }
+            };
+
+            Plotly.newPlot(plotDiv, [trace], layout, config);
+            currentLayout = layout;
+
+            // Add click event for image preview
+            plotDiv.on('plotly_click', function (event) {
+                if (event.points && event.points.length > 0) {
+                    const point = event.points[0];
+                    const imageData = point.customdata;
+                    showPreview(imageData);
+                }
+            });
+        }
+
+        function updateStats(data) {
+            const imageCount = document.getElementById('imageCount');
+            const formatCount = document.getElementById('formatCount');
+            const totalSize = document.getElementById('totalSize');
+
+            imageCount.textContent = data.length;
+
+            const formats = [...new Set(data.map(d => d.metadata.format))];
+            formatCount.textContent = formats.length;
+
+            const totalPixels = data.reduce((sum, d) => sum + (d.metadata.size || 0), 0);
+            const totalMP = (totalPixels / 1000000).toFixed(1);
+            totalSize.textContent = `${totalMP} MP`;
+        }
+
+        function resetView() {
+            if (plotData && currentLayout) {
+                const plotDiv = document.getElementById('plot');
+                Plotly.relayout(plotDiv, {
+                    'scene.camera': {
+                        eye: { x: 1.5, y: 1.5, z: 1.5 }
+                    }
+                });
+            }
+        }
+
+        async function showPreview(imageData) {
+            const preview = document.getElementById('preview');
+            const overlay = document.getElementById('overlay');
+            const previewImage = document.getElementById('previewImage');
+            const previewInfo = document.getElementById('previewInfo');
+
+            currentImageData = imageData;
+
+            try {
+                // Convert image to data URL for display
+                const response = await fetch('/api/mono/image_to_dataurl', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ path: imageData.fullPath || imageData.path })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Failed to load image: ${response.status}`);
+                }
+
+                const imageDataUrl = await response.json();
+                previewImage.src = imageDataUrl.data_url;
+
+                const filename = (imageData.fullPath || imageData.path).split('/').pop();
+                const pixels = imageData.metadata.size || 0;
+                const megapixels = (pixels / 1000000).toFixed(2);
+                const distance = (imageData.distanceToNearestNeighbor || 0).toFixed(3);
+
+                previewInfo.innerHTML = `
+                    <div class="info-row">
+                        <span class="info-label">File:</span>
+                        <span class="info-value">${filename}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Format:</span>
+                        <span class="info-value">${imageData.metadata.format}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Size:</span>
+                        <span class="info-value">${megapixels} MP</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Dimensions:</span>
+                        <span class="info-value">${imageData.metadata.dimensions.width}${imageData.metadata.dimensions.height}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">UMAP Position:</span>
+                        <span class="info-value">[${imageData.coordinates.map(c => c.toFixed(2)).join(', ')}]</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Nearest Neighbor Distance:</span>
+                        <span class="info-value">${distance}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Actions:</span>
+                        <div>
+                            <button class="command-btn open" onclick="openFile()">Open</button>
+                            <button class="command-btn reveal" onclick="revealInFinder()">Reveal in Finder</button>
+                        </div>
+                    </div>
+                `;
+
+                overlay.style.display = 'block';
+                preview.style.display = 'block';
+
+            } catch (err) {
+                console.error('Error loading preview:', err);
+                previewImage.src = '';
+                previewInfo.innerHTML = `<div style="color: #dc2626;">Error loading image preview</div>`;
+                overlay.style.display = 'block';
+                preview.style.display = 'block';
+            }
+        }
+
+        async function openFile() {
+            if (!currentImageData) return;
+
+            try {
+                // Construct the full path by combining the directory with the relative path
+                const imagePath = currentImageData.fullPath || currentImageData.path;
+                const fullPath = imagePath.startsWith('/') ? imagePath : `${currentDirectory}/${imagePath}`;
+
+                const response = await fetch('/api/mono/macos_file_commands', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        path: fullPath,
+                        directory: currentDirectory,
+                        execute: true
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Failed to open file: ${response.status}`);
+                }
+
+                const result = await response.json();
+
+                if (!result.success) {
+                    throw new Error(result.error || 'Command execution failed');
+                }
+
+                console.log('File opened successfully:', result.command);
+
+            } catch (err) {
+                console.error('Error opening file:', err);
+                alert('Failed to open file. Please check the file path and try again.');
+            }
+        }
+
+        async function revealInFinder() {
+            if (!currentImageData) return;
+
+            try {
+                // Construct the full path by combining the directory with the relative path
+                const imagePath = currentImageData.fullPath || currentImageData.path;
+                const fullPath = imagePath.startsWith('/') ? imagePath : `${currentDirectory}/${imagePath}`;
+
+                const response = await fetch('/api/mono/macos_file_commands', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        path: fullPath,
+                        directory: currentDirectory,
+                        executeDirectory: true
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Failed to reveal file: ${response.status}`);
+                }
+
+                const result = await response.json();
+
+                if (!result.success) {
+                    throw new Error(result.error || 'Command execution failed');
+                }
+
+                console.log('File revealed in Finder:', result.directoryCommand);
+
+            } catch (err) {
+                console.error('Error revealing file:', err);
+                alert('Failed to reveal file in Finder. Please check the file path and try again.');
+            }
+        }
+
+        function closePreview() {
+            document.getElementById('preview').style.display = 'none';
+            document.getElementById('overlay').style.display = 'none';
+            currentImageData = null;
+        }
+
+        // Allow Enter key to load data
+        document.getElementById('pathInput').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                loadData();
+            }
+        });
+    </script>
+</body>
+
+</html>

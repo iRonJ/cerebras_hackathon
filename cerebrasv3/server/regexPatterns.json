@@ -1,0 +1,32 @@
+[
+  {
+    "pattern": "^/api/mono/get_files(?:\\?.*)?$",
+    "toolName": "get_files_tool",
+    "method": "*",
+    "argMapping": {},
+    "priority": 10,
+    "description": "List files in a directory - args come from query or body"
+  },
+  {
+    "pattern": "^/api/mono/tool_configurator(?:\\?.*)?$",
+    "method": "POST",
+    "toolName": "tool_configurator",
+    "argMapping": {},
+    "priority": 50
+  },
+  {
+    "pattern": "^/api/mono/text_editor(?:\\?.*)?$",
+    "method": "POST",
+    "toolName": "text_editor",
+    "argMapping": {},
+    "priority": 50
+  },
+  {
+    "pattern": "^/api/mono/([a-z_0-9-]+)(?:\\?.*)?$",
+    "toolName": "$1",
+    "method": "*",
+    "argMapping": {},
+    "priority": 100,
+    "description": "Generic catch-all tool endpoint matcher"
+  }
+]

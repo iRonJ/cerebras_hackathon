@@ -1,0 +1,124 @@
+import Cerebras from '@cerebras/cerebras_cloud_sdk';
+import type {
+  DesktopModelProvider,
+  WidgetLLMResponse,
+} from './shared';
+import {
+  desktopSystemPrompt,
+  extractJsonPayload,
+  formatContextSnapshot,
+  widgetSchema,
+} from './shared';
+
+const DEFAULT_MODEL = process.env.CEREBRAS_MODEL ?? 'zai-glm-4.6';
+
+export class CerebrasProvider implements DesktopModelProvider {
+  readonly name = 'cerebras';
+  private readonly client: Cerebras;
+
+  constructor(
+    apiKey?: string,
+    private readonly model: string = DEFAULT_MODEL,
+  ) {
+    if (!apiKey) {
+      throw new Error(
+        'Missing CEREBRAS_API_KEY. Add it to .env or your shell environment.',
+      );
+    }
+    this.client = new Cerebras({ apiKey });
+  }
+
+  async generateWidget(
+    userPrompt: string,
+    contextSnapshot?: Record<string, string>,
+  ): Promise<WidgetLLMResponse> {
+    const messages: Array<{ role: 'system' | 'user'; content: string }> = [
+      { role: 'system', content: desktopSystemPrompt },
+    ];
+
+    const contextText = formatContextSnapshot(contextSnapshot);
+    if (contextText) {
+      messages.push({
+        role: 'system',
+        content: `Context snapshot:\n${contextText}`,
+      });
+    }
+
+    messages.push({
+      role: 'user',
+      content: `${userPrompt}\n\nReturn valid JSON only.`,
+    });
+
+    let attempts = 0;
+    while (attempts < 3) {
+      try {
+        const completion = (await this.client.chat.completions.create({
+          model: this.model,
+          temperature: 0.4,
+          response_format: {
+            type: 'json_schema',
+            json_schema: {
+              name: 'desktop_widget',
+              strict: true,
+              schema: widgetSchema,
+            },
+          },
+          messages,
+        })) as {
+          choices?: Array<{ message?: { content?: string } }>;
+        };
+
+        const assistantContent = completion.choices?.[0]?.message?.content;
+        if (!assistantContent) {
+          throw new Error('Cerebras chat API returned an empty response');
+        }
+        console.log('[CerebrasProvider] Raw Response:', assistantContent);
+
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(assistantContent);
+        } catch {
+          parsed = extractJsonPayload(assistantContent);
+        }
+
+        return parsed as WidgetLLMResponse;
+      } catch (error) {
+        attempts++;
+        console.error(`[CerebrasProvider] Attempt ${attempts} failed:`, error);
+
+        if (attempts >= 3) {
+          throw error;
+        }
+
+        // Add error to context for retry
+        messages.push({
+          role: 'user',
+          content: `Previous response failed to parse as JSON. Error: ${(error as Error).message}. Please fix the JSON and try again.`,
+        });
+      }
+    }
+    throw new Error('Failed to generate widget after 3 attempts');
+  }
+
+  async chat(systemPrompt: string, userPrompt: string): Promise<string> {
+    const totalPromptChars = systemPrompt.length + userPrompt.length;
+    const estimatedTokens = Math.ceil(totalPromptChars / 4); // rough estimate: ~4 chars per token
+    console.log(`[CerebrasProvider] Sending prompt: ${totalPromptChars} chars (~${estimatedTokens} tokens)`);
+
+    const completion = await this.client.chat.completions.create({
+      model: this.model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+    });
+    const response = completion as { choices: Array<{ message: { content: string } }> };
+    const responseText = response.choices[0]?.message?.content || '';
+
+    const responseChars = responseText.length;
+    const responseTokens = Math.ceil(responseChars / 4);
+    console.log(`[CerebrasProvider] Received response: ${responseChars} chars (~${responseTokens} tokens)`);
+
+    return responseText;
+  }
+}
