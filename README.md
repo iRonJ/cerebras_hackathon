@@ -6,6 +6,8 @@ A next-generation AI-powered desktop environment where applications are generate
 
 <video src="assets/aiDesktop.mp4" controls width="100%"></video>
 
+[Download Demo Video](assets/aiDesktop.mp4)
+
 This project represents a shift from static applications to a **dynamic, agentic OS**. Instead of pre-compiled binaries, the "OS" is a conversation with a high-speed LLM that can:
 1.  **Generate Apps**: Create full HTML/JS/WebGL applications on the fly.
 2.  **Execute Tools**: Bridge the gap between the web frontend and the host system using Python tools.
